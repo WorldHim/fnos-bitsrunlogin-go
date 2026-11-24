@@ -21,7 +21,9 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,8 +44,15 @@ var UISources embed.FS
 
 // Options configure a server.
 type Options struct {
-	// Addr is the listen address, for example "127.0.0.1:9877".
+	// Addr is the listen address, for example "127.0.0.1:9877". A value
+	// starting with "unix:" names a Unix socket instead, which is what the
+	// fnOS gateway forwards to.
 	Addr string
+
+	// GatewayPrefix is the path the fnOS gateway publishes this app under,
+	// for example "/app/bitsrunlogin-go". Requests arrive with that prefix and
+	// it is stripped before routing. Empty means no prefix.
+	GatewayPrefix string
 
 	// ConfigPath is the configuration file to read and write.
 	ConfigPath string
@@ -105,6 +114,14 @@ func New(opts Options) (*Server, error) {
 
 // routes wires the mux. Kept separate so tests can build a handler without
 // opening a socket.
+// routes() builds the routing table.
+//
+// When the server is reached through the fnOS gateway the request path still
+// carries the gateway prefix: the gateway forwards /app/bitsrunlogin-go/api/
+// status unchanged rather than stripping it. The prefix is removed once here so
+// every handler and the static file server keep seeing the paths they were
+// written for, and the same binary also works when the prefix is absent (direct
+// access during development).
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
@@ -123,7 +140,46 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 
 	mux.Handle("/", s.uiHandler())
-	return s.withMiddleware(mux)
+
+	return s.withMiddleware(stripGatewayPrefix(mux, s.gatewayPrefix()))
+}
+
+// stripGatewayPrefix removes the fnOS gateway prefix from the request path
+// before dispatching, so the routing table stays written against "/api/...".
+//
+// Doing it here rather than with http.StripPrefix avoids a corner case: a
+// request for the bare prefix would be rewritten to an empty path, which is not
+// a legal request target. Everything already without the prefix passes through
+// untouched, so the same handler also serves direct access.
+func stripGatewayPrefix(next http.Handler, prefix string) http.Handler {
+	if prefix == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			trimmed := strings.TrimPrefix(path, prefix)
+			if trimmed == "" {
+				trimmed = "/"
+			}
+			r2 := new(http.Request)
+			*r2 = *r
+			r2.URL = new(url.URL)
+			*r2.URL = *r.URL
+			r2.URL.Path = trimmed
+			r2.URL.RawPath = ""
+			next.ServeHTTP(w, r2)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// gatewayPrefix returns the path the fnOS gateway publishes this app under,
+// with any trailing slash removed. An empty result means the server is reached
+// directly and paths need no rewriting.
+func (s *Server) gatewayPrefix() string {
+	return strings.TrimSuffix(s.opts.GatewayPrefix, "/")
 }
 
 // uiHandler serves the embedded front end with a SPA fallback.
@@ -217,14 +273,21 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(host, r.Host)
 }
 
-// ListenAndServe binds the port and serves until ctx is cancelled.
+// ListenAndServe binds the configured address and serves until ctx is
+// cancelled.
+//
+// An address of the form "unix:/path/to/app.sock" creates a Unix socket
+// instead of a TCP listener. fnOS routes requests to such a socket through its
+// unified gateway, which is the only way a desktop iframe can reach a service
+// on another machine: a loopback TCP port only exists on the NAS itself, so the
+// browser that renders the iframe would connect to its own machine.
 //
 // It returns nil on a clean shutdown, so callers do not have to special case
 // http.ErrServerClosed.
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	lis, err := net.Listen("tcp", s.opts.Addr)
+	lis, err := listen(s.opts.Addr)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", s.opts.Addr, err)
+		return err
 	}
 
 	s.mu.Lock()
@@ -284,6 +347,55 @@ func (s *Server) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.addr
+}
+
+// listen opens the listener described by addr. A "unix:" prefix selects a Unix
+// socket; anything else is treated as a TCP address.
+//
+// A socket file left behind by a previous run would make the bind fail with
+// "address already in use" even though nothing is listening, so a stale one is
+// removed first. Only a socket that nothing answers on is removed: probing with
+// a dial keeps a live process from losing its listening socket.
+func listen(addr string) (net.Listener, error) {
+	path, isUnix := strings.CutPrefix(addr, "unix:")
+	if !isUnix {
+		lis, err := net.Listen("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("listen %s: %w", addr, err)
+		}
+		return lis, nil
+	}
+
+	if path == "" {
+		return nil, errors.New("server: unix address has no path")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("prepare socket directory: %w", err)
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		conn, dialErr := net.DialTimeout("unix", path, time.Second)
+		if dialErr == nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("listen %s: another process is already using it", addr)
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("remove stale socket %s: %w", path, err)
+		}
+	}
+
+	lis, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("listen %s: %w", addr, err)
+	}
+	// The gateway runs as root and forwards to this process; the package user
+	// owns the socket, so it has to be reachable for both.
+	if err := os.Chmod(path, 0o660); err != nil {
+		_ = lis.Close()
+		return nil, fmt.Errorf("set socket permissions: %w", err)
+	}
+	return lis, nil
 }
 
 // Handler exposes the routing table for tests.

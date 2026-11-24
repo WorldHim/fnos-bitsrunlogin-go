@@ -22,6 +22,11 @@ func quietLogger() *log.Logger {
 
 func newTestServer(t *testing.T, content string) (*Server, string) {
 	t.Helper()
+	return newTestServerOpts(t, content, Options{})
+}
+
+func newTestServerOpts(t *testing.T, content string, opts Options) (*Server, string) {
+	t.Helper()
 	if content == "" {
 		content = testConfig
 	}
@@ -31,12 +36,12 @@ func newTestServer(t *testing.T, content string) (*Server, string) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	srv, err := New(Options{
-		Addr:       "127.0.0.1:0",
-		ConfigPath: path,
-		Logger:     quietLogger(),
-		Version:    "test",
-	})
+	opts.Addr = "127.0.0.1:0"
+	opts.ConfigPath = path
+	opts.Logger = quietLogger()
+	opts.Version = "test"
+
+	srv, err := New(opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -338,5 +343,57 @@ func TestLogHookCapturesFromFieldLogger(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("entries = %+v, want one prefixed with the comp field", entries)
+	}
+}
+
+// The fnOS gateway forwards requests with its prefix still attached. Routing
+// has to keep working for both the prefixed and the bare path, because the same
+// binary also runs directly during development.
+func TestGatewayPrefixIsStripped(t *testing.T) {
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+
+	for _, target := range []string{
+		"/app/bitsrunlogin-go/api/version",
+		"/api/version",
+	} {
+		w := doRequest(t, srv.Handler(), "GET", target, "", nil)
+		if w.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200 (%s)", target, w.Code, w.Body.String())
+			continue
+		}
+		var got versionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Errorf("GET %s decode: %v", target, err)
+			continue
+		}
+		if got.Version != "test" {
+			t.Errorf("GET %s version = %q, want test", target, got.Version)
+		}
+	}
+}
+
+func TestGatewayPrefixServesUI(t *testing.T) {
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+
+	w := doRequest(t, srv.Handler(), "GET", "/app/bitsrunlogin-go/", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /app/bitsrunlogin-go/ status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+// An unknown API path under the prefix must still answer with the JSON 404
+// rather than the SPA shell.
+func TestGatewayPrefixKeepsAPI404(t *testing.T) {
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+
+	w := doRequest(t, srv.Handler(), "GET", "/app/bitsrunlogin-go/api/nope", "", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Type"), "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", w.Header().Get("Content-Type"))
 	}
 }

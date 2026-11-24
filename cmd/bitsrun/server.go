@@ -37,10 +37,11 @@ func runServer() {
 	defer stop()
 
 	srv, err := server.New(server.Options{
-		Addr:       flags.ServerAddr,
-		ConfigPath: flags.Path,
-		Logger:     logger.WithField(keys.LogComponent, "server"),
-		AutoStart:  true,
+		Addr:          flags.ServerAddr,
+		GatewayPrefix: flags.ServerGatewayPrefix,
+		ConfigPath:    flags.Path,
+		Logger:        logger.WithField(keys.LogComponent, "server"),
+		AutoStart:     true,
 	})
 	if err != nil {
 		logger.Fatalln("failed to start control server:", err)

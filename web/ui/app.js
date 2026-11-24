@@ -68,6 +68,21 @@
 
   // --- api ----------------------------------------------------------------
 
+  // basePath is the path the page is served under: "" when opened directly,
+  // "/app/bitsrunlogin-go" behind the fnOS gateway. Request paths are relative
+  // to it so the same page works in both cases.
+  var basePath = (function () {
+    var p = window.location.pathname;
+    var idx = p.indexOf('/api/');
+    if (idx >= 0) {
+      p = p.slice(0, idx);
+    }
+    if (p === '/' || p === '') {
+      return '';
+    }
+    return p.replace(/\/+$/, '');
+  })();
+
   var api = {
     request: function (method, path, body) {
       var init = { method: method, headers: { Accept: 'application/json' } };
@@ -75,7 +90,7 @@
         init.headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(body);
       }
-      return fetch(path, init).then(function (res) {
+      return fetch(basePath + path, init).then(function (res) {
         return res.text().then(function (text) {
           var data = null;
           if (text) {

@@ -24,9 +24,11 @@ var (
 	// Server 启动 Web 控制服务而不是直接执行登录流程。
 	Server bool
 
-	// ServerAddr 控制服务的监听地址。默认只监听回环地址：服务没有独立的
-	// 登录鉴权，靠 fnOS 桌面窗口反代访问，暴露到局域网等于把配置和账号
-	// 交给所有人。
+	// ServerAddr 控制服务的监听地址。默认只监听回环地址；写成
+	// "unix:/path/app.sock" 则改为监听 Unix Socket，供 fnOS 统一网关转发。
+	//
+	// 回环地址只对 NAS 本机有效：桌面 iframe 是在用户电脑的浏览器里渲染的，
+	// 那里的 127.0.0.1 指的是用户自己的机器，所以经网关访问必须走 Socket。
 	ServerAddr string
 
 	// ServerPIDFile 让服务在启动时写下自己的 pid。置空则不写。
@@ -35,6 +37,11 @@ var (
 	// 由启动它的脚本去记，记到的往往是切换用户那一层包装进程的 pid，
 	// 那个进程在拉起义子进程后立刻退出，后续的停止和状态检查都会误判。
 	ServerPIDFile string
+
+	// ServerGatewayPrefix 是 fnOS 网关发布本应用的路径，例如
+	// "/app/bitsrunlogin-go"。请求带着这个前缀到达，服务在路由前剥掉它。
+	// 置空表示不经网关，路径不需要改写。
+	ServerGatewayPrefix string
 )
 
 func init() {
@@ -49,6 +56,7 @@ func init() {
 	flag.BoolVar(&Server, "server", false, "run the web control server instead of a single login")
 	flag.StringVar(&ServerAddr, "server-addr", "127.0.0.1:9877", "listen address for -server")
 	flag.StringVar(&ServerPIDFile, "pid-file", "", "write the process id to this file on -server startup")
+	flag.StringVar(&ServerGatewayPrefix, "gateway-prefix", "", "path prefix the fnOS gateway publishes this app under")
 }
 
 func parseOnce() {
