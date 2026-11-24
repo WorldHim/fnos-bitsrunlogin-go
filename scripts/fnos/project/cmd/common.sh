@@ -126,12 +126,18 @@ config_uses_file_logging() {
 # This is hand written rather than produced by the binary because the binary
 # writes its default to the current working directory and exits, which the
 # lifecycle script cannot use.
+#
+# form.domain is left empty on purpose. The upstream default points at a
+# Microsoft connectivity-check page, which is almost never the campus portal;
+# shipping it would look like a configured install and send the first login to
+# the wrong host. An empty value makes the service stay idle and the UI ask for
+# the real address instead.
 write_default_config() {
 	[[ -f "${CONFIG_FILE}" ]] && return 0
 
 	cat >"${CONFIG_FILE}" <<-'EOF'
 		form:
-		  domain: "www.msftconnecttest.com"
+		  domain: ""
 		  username: ""
 		  usertype: "cmcc"
 		  password: ""
