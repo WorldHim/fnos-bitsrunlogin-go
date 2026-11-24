@@ -71,16 +71,21 @@
   // basePath is the path the page is served under: "" when opened directly,
   // "/app/bitsrunlogin-go" behind the fnOS gateway. Request paths are relative
   // to it so the same page works in both cases.
+  //
+  // The server injects it because the document's own URL is not a reliable
+  // source: a deep link like /app/bitsrunlogin-go/logs has the route as its
+  // last segment, and guessing from it produced requests for /app/api/... .
+  // It is read from the <base> tag the shell carries, falling back to the
+  // script URL for an html file served without the injection.
   var basePath = (function () {
-    var p = window.location.pathname;
-    var idx = p.indexOf('/api/');
-    if (idx >= 0) {
-      p = p.slice(0, idx);
+    if (typeof window.__BS_BASE__ === 'string') {
+      return window.__BS_BASE__.replace(/\/+$/, '');
     }
-    if (p === '/' || p === '') {
-      return '';
+    var base = document.querySelector('base');
+    if (base && base.getAttribute('href')) {
+      return base.getAttribute('href').replace(/\/+$/, '');
     }
-    return p.replace(/\/+$/, '');
+    return '';
   })();
 
   var api = {

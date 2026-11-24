@@ -8,14 +8,16 @@
 //
 // Routing follows the fnOS documentation: an app served on its own port is
 // free to choose its paths, and the native sample uses "/api" for the backend.
-// The UI is loaded from the root, so its fetch calls are relative and keep
-// working if the entry later moves behind the unified gateway under
-// /app/{appname}.
+// The routes are written without a prefix; when the package is published
+// behind the unified gateway the prefix is stripped before matching, and the
+// UI derives its base path from the URL it was loaded at.
 package server
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -23,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -158,6 +161,17 @@ func stripGatewayPrefix(next http.Handler, prefix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			// A bare mount point has no trailing slash, so the browser
+			// would resolve every relative URL against the parent
+			// directory. Send it to the directory form first.
+			if path == prefix && r.Method == http.MethodGet {
+				redirectPath := path + "/"
+				if r.URL.RawQuery != "" {
+					redirectPath += "?" + r.URL.RawQuery
+				}
+				http.Redirect(w, r, redirectPath, http.StatusMovedPermanently)
+				return
+			}
 			trimmed := strings.TrimPrefix(path, prefix)
 			if trimmed == "" {
 				trimmed = "/"
@@ -168,6 +182,9 @@ func stripGatewayPrefix(next http.Handler, prefix string) http.Handler {
 			*r2.URL = *r.URL
 			r2.URL.Path = trimmed
 			r2.URL.RawPath = ""
+			// The UI needs the path the browser used to build its base
+			// href; after this point only the trimmed path is visible.
+			r2 = r2.WithContext(context.WithValue(r.Context(), originalPathKey{}, path))
 			next.ServeHTTP(w, r2)
 			return
 		}
@@ -207,15 +224,71 @@ func (s *Server) uiHandler() http.Handler {
 				return
 			}
 		}
-		index, readErr := fs.ReadFile(sub, "index.html")
-		if readErr != nil {
-			http.Error(w, "UI not built", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(index)
+		serveIndex(w, r, sub)
 	})
+}
+
+// originalPathKey carries the path the client requested through the context,
+// so a handler that only sees the trimmed path can still tell where the page
+// was mounted.
+type originalPathKey struct{}
+
+// originalPath returns the path the request arrived with.
+func originalPath(r *http.Request) string {
+	if p, ok := r.Context().Value(originalPathKey{}).(string); ok {
+		return p
+	}
+	return r.URL.Path
+}
+
+// indexBootScript points the document's asset and API base at the directory
+// the page was served from.
+//
+// The UI is published under a gateway prefix and can be opened at a deep link
+// such as /app/myapp/logs. Relative asset URLs then resolve against the last
+// segment ("/app/myapp/"), not the mount point, so app.css would be requested
+// from /app/ and 404. A relative base has the same problem. Resolving against
+// the path the request actually arrived at, without its last segment and with
+// a trailing slash, is correct for a bare mount point, a deep link and a
+// direct loopback start alike. It is emitted rather than read from request
+// context because the handler stays an ordinary http.Handler.
+func indexBootScript(r *http.Request) []byte {
+	base := path.Dir(originalPath(r))
+	if base != "/" {
+		base += "/"
+	}
+	quoted, err := json.Marshal(base)
+	if err != nil {
+		return nil
+	}
+	return []byte("<base href=" + string(quoted) + ">\n" +
+		"<script>window.__BS_BASE__ = " + string(quoted) + ";</script>\n")
+}
+
+// serveIndex answers with the SPA shell, whose <head> receives the base tag
+// for the current request path.
+func serveIndex(w http.ResponseWriter, r *http.Request, sub fs.FS) {
+	index, readErr := fs.ReadFile(sub, "index.html")
+	if readErr != nil {
+		http.Error(w, "UI not built", http.StatusNotFound)
+		return
+	}
+	// The tag goes right after <head> so it applies to every asset the shell
+	// references, including ones added later by the page.
+	injected := index
+	if script := indexBootScript(r); script != nil {
+		if at := bytes.Index(index, []byte("<head>")); at >= 0 {
+			at += len("<head>")
+			injected = make([]byte, 0, len(index)+len(script))
+			injected = append(injected, index[:at]...)
+			injected = append(injected, '\n')
+			injected = append(injected, script...)
+			injected = append(injected, index[at:]...)
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(injected)
 }
 
 // withMiddleware adds request logging, panic recovery and the CSRF guard.

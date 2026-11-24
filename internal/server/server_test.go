@@ -384,6 +384,65 @@ func TestGatewayPrefixServesUI(t *testing.T) {
 	}
 }
 
+// The shell must tell the browser where its assets live. Without this the
+// page loaded at a deep link requests app.css relative to the last path
+// segment, which is what produced the 404s in the fnOS desktop.
+func TestGatewayPrefixInjectsBasePath(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"mount point", "/app/bitsrunlogin-go/", `<base href="/app/bitsrunlogin-go/">`},
+		{"deep link", "/app/bitsrunlogin-go/logs", `<base href="/app/bitsrunlogin-go/">`},
+		{"root", "/", `<base href="/">`},
+	}
+
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doRequest(t, srv.Handler(), "GET", tc.path, "", nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want 200", tc.path, w.Code)
+			}
+			body := w.Body.String()
+			if !strings.Contains(body, tc.want) {
+				t.Errorf("GET %s body does not contain %s\nbody:\n%s", tc.path, tc.want, body)
+			}
+			if !strings.Contains(body, `window.__BS_BASE__`) {
+				t.Errorf("GET %s body does not carry the JS base path", tc.path)
+			}
+		})
+	}
+}
+
+// A bare mount point must land on the directory form, otherwise the browser
+// resolves relative URLs against the parent directory.
+func TestGatewayPrefixRedirectsBareMountPoint(t *testing.T) {
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+
+	w := doRequest(t, srv.Handler(), "GET", "/app/bitsrunlogin-go", "", nil)
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, want 301", w.Code)
+	}
+	if got := w.Header().Get("Location"); got != "/app/bitsrunlogin-go/" {
+		t.Errorf("Location = %q, want /app/bitsrunlogin-go/", got)
+	}
+}
+
+// The browser has to be able to fetch an asset the base tag points at.
+func TestGatewayPrefixResolvesAssetsUnderDeepLinkBase(t *testing.T) {
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+
+	w := doRequest(t, srv.Handler(), "GET", "/app/bitsrunlogin-go/app.css", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /app/bitsrunlogin-go/app.css status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "css") {
+		t.Errorf("Content-Type = %q, want a css type", ct)
+	}
+}
+
 // An unknown API path under the prefix must still answer with the JSON 404
 // rather than the SPA shell.
 func TestGatewayPrefixKeepsAPI404(t *testing.T) {
