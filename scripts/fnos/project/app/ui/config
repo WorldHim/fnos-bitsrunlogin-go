@@ -1,0 +1,16 @@
+{
+  ".url": {
+    "bitsrunlogin-go.main": {
+      "title": "深澜校园网登录",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "http",
+      "port": "${wizard_port}",
+      "url": "/",
+      "allUsers": true,
+      "control": {
+        "accessPerm": "editable"
+      }
+    }
+  }
+}

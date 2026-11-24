@@ -1,0 +1,20 @@
+appname               = bitsrunlogin-go
+version               = 1.6.8
+display_name          = 深澜校园网登录
+desc                  = 自动登录深澜（srun）校园网认证。支持守护检测、断网重连、多网卡与 DDNS，可在应用界面中修改账号和网络参数。
+source                = thirdparty
+platform              = all
+
+maintainer            = WorldHim
+maintainer_url        = https://github.com/WorldHim/fnos-bitsrunlogin-go
+distributor           = WorldHim
+distributor_url       = https://github.com/WorldHim/fnos-bitsrunlogin-go
+
+os_min_version        = 0.9.0
+
+desktop_uidir         = ui
+desktop_applaunchname = bitsrunlogin-go.main
+
+ctl_stop              = true
+checkport             = true
+service_port          = 9877
