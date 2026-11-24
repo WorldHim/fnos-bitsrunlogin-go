@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Mmx233/BitSrunLoginGo/internal/config"
+	"github.com/Mmx233/BitSrunLoginGo/internal/config/flags"
 )
 
 // The package init already ran by the time these tests execute, so the tests
@@ -94,5 +95,72 @@ func TestLoadRejectsInvalidConfig(t *testing.T) {
 	}
 	if errors.Is(err, config.ErrConfigCreated) {
 		t.Fatal("a parse failure must not be reported as ErrConfigCreated")
+	}
+}
+
+// writeConfig writes a minimal configuration with the given acid and enc.
+func writeConfig(t *testing.T, acid, enc string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Config.yaml")
+	body := "form:\n  domain: portal.example.com\n  username: alice\n  password: secret\n" +
+		"meta:\n  acid: \"" + acid + "\"\n  enc: \"" + enc + "\"\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoadEnablesDetectionForEmptyMeta(t *testing.T) {
+	defer func(acid, enc bool) {
+		flags.AutoAcid, flags.AutoEnc = acid, enc
+	}(flags.AutoAcid, flags.AutoEnc)
+	flags.AutoAcid, flags.AutoEnc = false, false
+
+	if err := config.Load(writeConfig(t, "", ""), false); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !flags.AutoAcid {
+		t.Error("an empty acid must turn detection on")
+	}
+	if !flags.AutoEnc {
+		t.Error("an empty enc must turn detection on")
+	}
+}
+
+func TestLoadKeepsConfiguredMeta(t *testing.T) {
+	defer func(acid, enc bool) {
+		flags.AutoAcid, flags.AutoEnc = acid, enc
+	}(flags.AutoAcid, flags.AutoEnc)
+	flags.AutoAcid, flags.AutoEnc = false, false
+
+	if err := config.Load(writeConfig(t, "5", "srun_bx1"), false); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if flags.AutoAcid {
+		t.Error("a configured acid must not trigger detection")
+	}
+	if flags.AutoEnc {
+		t.Error("a configured enc must not trigger detection")
+	}
+	if config.Meta.Acid != "5" || config.Meta.Enc != "srun_bx1" {
+		t.Errorf("meta = %q/%q, want the configured values", config.Meta.Acid, config.Meta.Enc)
+	}
+}
+
+func TestLoadDetectsOnlyTheEmptyField(t *testing.T) {
+	defer func(acid, enc bool) {
+		flags.AutoAcid, flags.AutoEnc = acid, enc
+	}(flags.AutoAcid, flags.AutoEnc)
+	flags.AutoAcid, flags.AutoEnc = false, false
+
+	if err := config.Load(writeConfig(t, "5", ""), false); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if flags.AutoAcid {
+		t.Error("acid was configured, detection must stay off")
+	}
+	if !flags.AutoEnc {
+		t.Error("enc was empty, detection must be on")
 	}
 }

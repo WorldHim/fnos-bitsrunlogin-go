@@ -81,10 +81,34 @@ func Load(path string, create bool) error {
 	if flags.Acid != "" {
 		Meta.Acid = flags.Acid
 	}
+	applyAutoDetect()
 
 	initLogFinal()
 	initBackoff()
 	return nil
+}
+
+// applyAutoDetect turns the sniffer on for every authentication parameter that
+// was left empty.
+//
+// acid and enc both feed the checksum the portal verifies, so an empty value
+// cannot authenticate at all - it is not a valid mode, only a missing one.
+// Treating it as "please detect" is therefore unambiguous, and it is the only
+// way to ask for detection from the configuration file: -auto-acid and
+// -auto-enc live on the command line, which the web UI cannot reach.
+//
+// An explicitly configured value still wins: the sniffer only fills a gap, and
+// the login code keeps the configured value when detection fails.
+func applyAutoDetect() {
+	if Meta == nil {
+		return
+	}
+	if Meta.Acid == "" {
+		flags.AutoAcid = true
+	}
+	if Meta.Enc == "" {
+		flags.AutoEnc = true
+	}
 }
 
 type wrappedErr struct {

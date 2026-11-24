@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -188,6 +189,13 @@ func doLogin(conf SingleConf) error {
 		logger.Debugln("开始嗅探")
 		acid, err := srunDetector.WithLogger(logger).DetectAcid()
 		if err != nil {
+			// Falling back to a configured value is normal. Falling back to an
+			// empty one is not: acid is part of the checksum the portal
+			// verifies, so the login below cannot succeed. Say so here instead
+			// of letting the portal answer with a generic error.
+			if srunClient.LoginInfo.Meta.Acid == "" {
+				return errWrapDetect("未配置 acid 且自动探测失败", err)
+			}
 			if errors.Is(err, srun.ErrAcidCannotFound) {
 				logger.Warnln("找不到 acid，使用配置 acid")
 			} else {
@@ -205,6 +213,9 @@ func doLogin(conf SingleConf) error {
 		logger.Debugln("开始嗅探")
 		enc, err := srunDetector.WithLogger(logger).DetectEnc()
 		if err != nil {
+			if srunClient.LoginInfo.Meta.Enc == "" {
+				return errWrapDetect("未配置 enc 且自动探测失败", err)
+			}
 			if errors.Is(err, srun.ErrEnvCannotFound) {
 				logger.Warnln("找不到 enc，使用配置 enc")
 			} else {
@@ -278,4 +289,10 @@ func doLogin(conf SingleConf) error {
 	}
 
 	return nil
+}
+
+// errWrapDetect marks a failure where a value had to be sniffed because the
+// configuration left it empty, and sniffing did not produce one.
+func errWrapDetect(msg string, err error) error {
+	return fmt.Errorf("%s：%w", msg, err)
 }
