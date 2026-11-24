@@ -267,30 +267,81 @@ is_running() {
 # request to shut the login loop down cleanly, so an in-flight login is not
 # cut off mid request. Only a process that ignores it is killed outright.
 stop_process() {
+	local stopped=1
 	local pid
-	if ! pid="$(read_pid)"; then
-		echo_to_logs "not running, nothing to stop"
-		return 0
+	if pid="$(read_pid)"; then
+		echo_to_logs "stopping pid ${pid}"
+		kill -TERM "${pid}" 2>/dev/null || true
+
+		local waited=0
+		while kill -0 "${pid}" 2>/dev/null && ((waited < 15)); do
+			sleep 1
+			waited=$((waited + 1))
+		done
+
+		if kill -0 "${pid}" 2>/dev/null; then
+			echo_to_logs "pid ${pid} did not exit after ${waited}s, sending SIGKILL"
+			kill -KILL "${pid}" 2>/dev/null || true
+			sleep 1
+		fi
+		rm -f "${PID_FILE}" 2>/dev/null
+	else
+		echo_to_logs "no usable pid file"
+		stopped=0
 	fi
 
-	echo_to_logs "stopping pid ${pid}"
-	kill -TERM "${pid}" 2>/dev/null || true
+	# The pid file can be missing or stale while the service is still up: an
+	# interrupted install, a removed var directory, or a pid that was reused.
+	# Leaving those processes behind is what made every later start fail with
+	# "address already in use", so sweep by name as a last resort.
+	kill_leftovers
+
+	echo_to_logs "stopped"
+	[[ "${stopped}" == "1" ]] || echo_to_logs "cleaned up stray processes"
+	return 0
+}
+
+# kill_leftovers stops any remaining process of this app, identified by its
+# executable name. It is deliberately narrow: the pattern has to match the
+# app's own binary so unrelated processes are never touched.
+kill_leftovers() {
+	local pids
+	pids="$(pids_of_app 2>/dev/null || true)"
+	[[ -n "${pids}" ]] || return 0
+
+	echo_to_logs "leftover process(es): ${pids}"
+	# shellcheck disable=SC2086
+	kill -TERM ${pids} 2>/dev/null || true
 
 	local waited=0
-	while kill -0 "${pid}" 2>/dev/null && ((waited < 15)); do
+	local remaining
+	while ((waited < 10)); do
+		remaining="$(pids_of_app 2>/dev/null || true)"
+		[[ -n "${remaining}" ]] || return 0
 		sleep 1
 		waited=$((waited + 1))
 	done
 
-	if kill -0 "${pid}" 2>/dev/null; then
-		echo_to_logs "pid ${pid} did not exit after ${waited}s, sending SIGKILL"
-		kill -KILL "${pid}" 2>/dev/null || true
-		sleep 1
-	fi
-
-	rm -f "${PID_FILE}" 2>/dev/null
-	echo_to_logs "stopped"
+	# shellcheck disable=SC2086
+	kill -KILL ${remaining} 2>/dev/null || true
+	sleep 1
 	return 0
+}
+
+# pids_of_app prints the pids whose command line runs this app's binary. The
+# pid in the pid file is included even when its process name no longer matches,
+# because a genuinely running service must never be left unpoliced.
+pids_of_app() {
+	local found=""
+	local dir
+	for dir in /proc/[0-9]*; do
+		[[ -r "${dir}/comm" ]] || continue
+		local comm
+		comm="$(<"${dir}/comm")" 2>/dev/null || continue
+		[[ "${comm}" == *bitsrun* ]] || continue
+		found="${found} ${dir#/proc/}"
+	done
+	printf '%s' "${found# }"
 }
 
 # start_process launches the service in the background.

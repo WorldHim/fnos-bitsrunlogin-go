@@ -199,6 +199,24 @@ echo "stop when already stopped"
 bash "${MAIN}" stop >/dev/null 2>&1
 check_status 0 $? "stop is idempotent"
 
+# A service whose pid file went missing must still be stopped. Otherwise the
+# process stays on the port, the next start fails to bind, and the failure
+# shows up as a settings change that will not save.
+if [[ -r "/proc/$$/comm" ]]; then
+	echo "stop recovers a service with no pid file"
+	bash "${MAIN}" start >/dev/null 2>&1
+	orphan="$(cat "${TRIM_PKGVAR}/app.pid" 2>/dev/null)"
+	rm -f "${TRIM_PKGVAR}/app.pid"
+	bash "${MAIN}" stop >/dev/null 2>&1
+	check_status 0 $? "stop succeeds without a pid file"
+	sleep 1
+	kill -0 "${orphan}" 2>/dev/null &&
+		bad "stray process reclaimed" ||
+		ok "stray process reclaimed"
+else
+	echo "skip stray process test (no /proc)"
+fi
+
 echo "stale pid file"
 mkdir -p "${TRIM_PKGVAR}"
 printf '999999\n' >"${TRIM_PKGVAR}/app.pid"
