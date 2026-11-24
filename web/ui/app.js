@@ -402,6 +402,9 @@
       var userInput = input('text', f.username, { placeholder: '学号 / 手机号' });
       var typeInput = select(
         [
+          // Empty is a valid choice: some campuses authenticate with the bare
+          // username and reject the "@cmcc" suffix.
+          { value: '', label: '不指定（部分学校适用）' },
           { value: 'cmcc', label: '中国移动 cmcc' },
           { value: 'telecom', label: '中国电信 telecom' },
           { value: 'unicom', label: '中国联通 unicom' }
@@ -417,7 +420,7 @@
         section('登录账号', [
           field('认证地址', domainInput, '深澜认证页面的域名，通常无需修改'),
           field('上网账号', userInput),
-          field('运营商', typeInput),
+          field('运营商', typeInput, '选择后会以「账号@运营商」的形式提交，不指定则直接使用账号'),
           field('密码', passInput, f.has_password ? '已保存密码，留空表示保持不变' : '尚未设置密码')
         ])
       );
