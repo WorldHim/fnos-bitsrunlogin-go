@@ -68,6 +68,15 @@ chmod +x "${ROOT}/cmd/"*
 # A stand-in for the Go binary: it records the arguments it was given and then
 # waits, so the process state machine can be observed. The binary sits directly
 # in the install root, next to var/, so the path is one level down.
+#
+# It is a script in front of a copy of sleep rather than `exec sleep`: is_running
+# identifies the service by /proc/<pid>/comm, which reports the kernel's name for
+# the executable, so an exec'd sleep would look like a crashed service. Copying
+# sleep to a file called bitsrun keeps the comm right, and `exec -a` cannot help
+# because it only rewrites argv[0].
+FAKE_STAGE="${WORK}/fake-stage"
+mkdir -p "${FAKE_STAGE}"
+cp "$(command -v sleep)" "${FAKE_STAGE}/bitsrun"
 cat >"${ROOT}/bitsrun" <<'FAKE'
 #!/bin/bash
 printf '%s\n' "$@" >"$(dirname "$0")/var/argv.txt"
@@ -80,9 +89,13 @@ for arg in "$@"; do
 	fi
 	prev="${arg}"
 done
-exec sleep 300
+# Re-exec the copied sleep under this process, so the pid stays the same and
+# the comm stays bitsrun.
+exec "$(dirname "$0")/.fake/bitsrun" 300
 FAKE
-chmod +x "${ROOT}/bitsrun"
+mkdir -p "${ROOT}/.fake"
+cp "${FAKE_STAGE}/bitsrun" "${ROOT}/.fake/bitsrun"
+chmod +x "${ROOT}/bitsrun" "${ROOT}/.fake/bitsrun"
 
 export TRIM_APPDEST="${ROOT}"
 export TRIM_PKGVAR="${ROOT}/var"
