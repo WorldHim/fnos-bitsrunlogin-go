@@ -66,6 +66,19 @@
     );
   }
 
+  // The server reports which required setting is missing by its config path
+  // ("form.password"); the UI shows the name used on the settings page.
+  var FIELD_LABELS = {
+    form: '登录配置',
+    'form.domain': '认证地址',
+    'form.username': '上网账号',
+    'form.password': '密码'
+  };
+
+  function fieldLabel(field) {
+    return FIELD_LABELS[field] || field || '登录配置';
+  }
+
   // --- api ----------------------------------------------------------------
 
   // basePath is the path the page is served under: "" when opened directly,
@@ -264,14 +277,40 @@
           }
         }
 
+        // A fresh install has no account yet. Point at the settings page
+        // instead of showing an error from a login nobody asked for.
+        var guideBox = $('#ov-guide');
+        if (guideBox) {
+          guideBox.innerHTML = '';
+          if (!st.configured) {
+            guideBox.appendChild(
+              el('div', { class: 'alert alert-info' }, [
+                el('strong', {}, ['还差一步：填写上网账号']),
+                el('div', {}, [
+                  st.config_missing
+                    ? '尚未生成配置文件，请到「基础设置」页保存一次。'
+                    : '缺少「' + fieldLabel(st.missing_field) + '」，登录尚未启动。'
+                ]),
+                el('div', { class: 'guide-actions' }, [
+                  el('button', { class: 'btn btn-primary', onclick: function () {
+                    location.hash = '#/settings';
+                  } }, ['去填写'])
+                ])
+              ])
+            );
+          }
+        }
+
         var verBox = $('#ov-version');
         if (verBox) verBox.textContent = (ver.version || 'dev') + ' · ' + ver.go_version;
 
         // Keep the action buttons in sync with the loop state.
         var startBtn = $('#btn-start');
         var stopBtn = $('#btn-stop');
-        if (startBtn) startBtn.disabled = running;
+        var loginBtn = $('#btn-login');
+        if (startBtn) startBtn.disabled = running || !st.configured;
         if (stopBtn) stopBtn.disabled = !running;
+        if (loginBtn) loginBtn.disabled = !st.configured;
       }).catch(function (err) {
         notify('读取状态失败：' + err.message, 'error');
       });
@@ -299,6 +338,7 @@
     );
 
     root.appendChild(stateBox);
+    root.appendChild(el('div', { id: 'ov-guide' }));
     root.appendChild(el('div', { id: 'ov-error' }));
     root.appendChild(section('当前账号', [el('div', { id: 'ov-account' })]));
     root.appendChild(

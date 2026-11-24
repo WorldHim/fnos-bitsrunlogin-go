@@ -391,6 +391,22 @@ input[type="checkbox"] {
   color: var(--error);
 }
 
+.alert-info {
+  background: rgba(43, 125, 233, 0.08);
+  border: 1px solid rgba(43, 125, 233, 0.35);
+  color: var(--text);
+}
+
+.alert-info strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent);
+}
+
+.guide-actions {
+  margin-top: 10px;
+}
+
 /* --- logs --------------------------------------------------------------- */
 
 .log-view {
