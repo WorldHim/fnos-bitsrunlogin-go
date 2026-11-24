@@ -9,12 +9,12 @@ import (
 	"github.com/Mmx233/BitSrunLoginGo/tools"
 )
 
-// newResolver 选择 DNS 解析器，优先使用配置 dns_server
+// newResolver 选择 DNS 解析器，优先使用配置 dns_server，否则使用系统默认解析器
 func newResolver() *net.Resolver {
 	if server := config.Settings.Basic.DNSServer; server != "" {
 		return resolverFromServers([]string{ensureDNSPort(server)})
 	}
-	return platformResolver()
+	return nil
 }
 
 // resolverFromServers 构造将查询定向到指定 DNS 服务器的解析器，
