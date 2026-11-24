@@ -21,8 +21,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 : "${TRIM_APPDEST:=$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
 
 # The app's own directory is target/, which is what TRIM_APPDEST points at.
+# The payload is not nested under an app/ directory: fnpack stores the payload
+# as app.tgz and the installer extracts its contents straight into this root,
+# so the binary that was staged at app/bitsrun lands at bitsrun.
 APP_DEST="${TRIM_APPDEST}"
-APP_BIN="${APP_DEST}/app/bitsrun"
+APP_BIN="${APP_DEST}/bitsrun"
 
 # Writable directories. Configuration, logs and the pid file must survive an
 # upgrade, and target/ is replaced wholesale during one, so they never live

@@ -61,18 +61,19 @@ check_status() {
 # --- build a fake install tree ---------------------------------------------
 
 ROOT="${WORK}/app"
-mkdir -p "${ROOT}/cmd" "${ROOT}/app" "${ROOT}/var"
+mkdir -p "${ROOT}/cmd" "${ROOT}/var"
 cp "${SRC}/cmd/"* "${ROOT}/cmd/"
 chmod +x "${ROOT}/cmd/"*
 
 # A stand-in for the Go binary: it records the arguments it was given and then
-# waits, so the process state machine can be observed.
-cat >"${ROOT}/app/bitsrun" <<'FAKE'
+# waits, so the process state machine can be observed. The binary sits directly
+# in the install root, next to var/, so the path is one level down.
+cat >"${ROOT}/bitsrun" <<'FAKE'
 #!/bin/bash
-printf '%s\n' "$@" >"$(dirname "$0")/../var/argv.txt"
+printf '%s\n' "$@" >"$(dirname "$0")/var/argv.txt"
 exec sleep 300
 FAKE
-chmod +x "${ROOT}/app/bitsrun"
+chmod +x "${ROOT}/bitsrun"
 
 export TRIM_APPDEST="${ROOT}"
 export TRIM_PKGVAR="${ROOT}/var"
@@ -207,10 +208,10 @@ bash "${MAIN}" bogus >/dev/null 2>&1
 check_status 1 $? "unknown action fails"
 
 echo "missing binary"
-mv "${ROOT}/app/bitsrun" "${ROOT}/app/bitsrun.off"
+mv "${ROOT}/bitsrun" "${ROOT}/bitsrun.off"
 bash "${MAIN}" start >/dev/null 2>&1
 check_status 1 $? "start fails when the binary is missing"
-mv "${ROOT}/app/bitsrun.off" "${ROOT}/app/bitsrun"
+mv "${ROOT}/bitsrun.off" "${ROOT}/bitsrun"
 
 echo
 printf '%d passed, %d failed\n' "${pass}" "${fail}"
