@@ -326,22 +326,37 @@ start_process() {
 		return 1
 	}
 
+	# $! is the pid of as_app_user, not of the service: when it has to switch
+	# users, runuser or su forks the real process and exits, so $! names a
+	# process that is already gone. Recording that pid made every later check
+	# believe the service was down: stop left the old process running, start
+	# spawned another one, and each settings change added a process until the
+	# port was taken.
+	#
+	# The service is asked to record its own pid instead. dash and bash both
+	# keep $$ stale in a `sh -c` subshell on some paths, so a wrapper shell
+	# cannot be trusted to report the right number; the binary writes the pid
+	# file itself on startup (see internal/server), and that number is
+	# unambiguous because it comes from the very process that serves requests.
+	rm -f "${PID_FILE}" 2>/dev/null
 	as_app_user "${APP_BIN}" \
 		--server \
 		--server-addr "127.0.0.1:${port}" \
 		--config "${CONFIG_FILE}" \
+		--pid-file "${PID_FILE}" \
 		>>"${LOG_FILE}" 2>&1 </dev/null &
-	local pid=$!
 
 	cd "${dir}" || true
 
-	printf '%s\n' "${pid}" >"${PID_FILE}" 2>/dev/null
-	chmod 600 "${PID_FILE}" 2>/dev/null || true
-
 	# Give the process a moment to bind the port so a failure is reported
-	# here instead of surfacing later as a blank iframe.
+	# here instead of surfacing later as a blank iframe. The pid file is
+	# written by the launched shell, so give it a moment to appear before the
+	# first check, and drop the mode to owner-only once it exists.
 	local waited=0
 	while ((waited < 10)); do
+		if [[ -s "${PID_FILE}" ]]; then
+			chmod 600 "${PID_FILE}" 2>/dev/null || true
+		fi
 		if is_running; then
 			echo_to_logs "started (pid $(read_pid))"
 			return 0

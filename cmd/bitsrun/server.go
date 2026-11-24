@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,6 +22,17 @@ import (
 func runServer() {
 	logger := config.Logger
 
+	// The pid file has to name this process, so it is written after the
+	// process exists and before anything can fail to start. A wrapper script
+	// cannot do this: it records the pid of the shell or of the tool that
+	// switched users, and that process is gone by the time anyone looks.
+	if path := flags.ServerPIDFile; path != "" {
+		if err := writePIDFile(path); err != nil {
+			logger.Fatalln("cannot write pid file:", err)
+		}
+		defer os.Remove(path)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -38,4 +50,11 @@ func runServer() {
 		logger.Fatalln("control server stopped:", err)
 	}
 	logger.Infoln("control server stopped")
+}
+
+// writePIDFile records the current process id so the lifetime scripts can tell
+// whether the service is running.
+func writePIDFile(path string) error {
+	pid := fmt.Sprintf("%d\n", os.Getpid())
+	return os.WriteFile(path, []byte(pid), 0o600)
 }

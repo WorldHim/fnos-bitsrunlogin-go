@@ -71,6 +71,15 @@ chmod +x "${ROOT}/cmd/"*
 cat >"${ROOT}/bitsrun" <<'FAKE'
 #!/bin/bash
 printf '%s\n' "$@" >"$(dirname "$0")/var/argv.txt"
+# Act like the real binary: it writes its own pid file. The script passes the
+# path after --pid-file, and the value after that is where to write it.
+prev=""
+for arg in "$@"; do
+	if [[ "${prev}" == "--pid-file" ]]; then
+		printf '%s\n' "$$" >"${arg}"
+	fi
+	prev="${arg}"
+done
 exec sleep 300
 FAKE
 chmod +x "${ROOT}/bitsrun"
@@ -123,6 +132,16 @@ check_status 0 $? "start succeeds"
 bash "${MAIN}" status
 check_status 0 $? "status reports running"
 
+# The pid in the file has to be the service itself. Recording the pid of the
+# wrapper that was asked to switch users leaves a number that dies at once:
+# every later command then believes the service is down, stop kills nothing
+# and each start adds another process. A pid that is alive proves the value
+# came from the process that is actually serving, not from a wrapper.
+echo "pid file names the service process"
+recorded_pid="$(cat "${TRIM_PKGVAR}/app.pid" 2>/dev/null)"
+[[ -n "${recorded_pid}" ]] && ok "pid file is not empty" || bad "pid file is not empty"
+kill -0 "${recorded_pid}" 2>/dev/null && ok "recorded pid is alive" || bad "recorded pid is alive"
+
 echo "arguments passed to the binary"
 [[ -f "${TRIM_PKGVAR}/argv.txt" ]] && ok "binary was invoked" || bad "binary was invoked"
 grep -qx -- '--server' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null && ok "runs in server mode" || bad "runs in server mode"
@@ -132,6 +151,9 @@ grep -qx -- '127.0.0.1:9877' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
 grep -qx -- "${TRIM_PKGVAR}/Config.yaml" "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
 	ok "config path points at the persistent file" ||
 	bad "config path points at the persistent file"
+grep -qx -- '--pid-file' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
+	ok "service is told to write its own pid" ||
+	bad "service is told to write its own pid"
 
 echo "start is idempotent"
 pid_before="$(cat "${TRIM_PKGVAR}/app.pid")"

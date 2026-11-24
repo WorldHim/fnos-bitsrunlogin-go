@@ -28,6 +28,13 @@ var (
 	// 登录鉴权，靠 fnOS 桌面窗口反代访问，暴露到局域网等于把配置和账号
 	// 交给所有人。
 	ServerAddr string
+
+	// ServerPIDFile 让服务在启动时写下自己的 pid。置空则不写。
+	//
+	// fnOS 用它来判断服务是否在运行。由服务自己写能拿到确定的进程号：
+	// 由启动它的脚本去记，记到的往往是切换用户那一层包装进程的 pid，
+	// 那个进程在拉起义子进程后立刻退出，后续的停止和状态检查都会误判。
+	ServerPIDFile string
 )
 
 func init() {
@@ -41,6 +48,7 @@ func init() {
 
 	flag.BoolVar(&Server, "server", false, "run the web control server instead of a single login")
 	flag.StringVar(&ServerAddr, "server-addr", "127.0.0.1:9877", "listen address for -server")
+	flag.StringVar(&ServerPIDFile, "pid-file", "", "write the process id to this file on -server startup")
 }
 
 func parseOnce() {
