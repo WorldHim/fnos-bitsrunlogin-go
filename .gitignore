@@ -8,6 +8,10 @@
 /main*
 /*.code-workspace
 
+# Config files written by 'go test' inside package directories
+**/Config.yaml
+**/Config.json
+
 # fnOS packaging leftovers
 *.fpk
 .*.fpk-*

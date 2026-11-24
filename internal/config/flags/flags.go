@@ -2,7 +2,14 @@ package flags
 
 import (
 	"flag"
+	"sync"
+	"testing"
 )
+
+var parsed struct {
+	sync.Mutex
+	done bool
+}
 
 var (
 	// Path 配置文件路径
@@ -23,6 +30,41 @@ func init() {
 	flag.BoolVar(&AutoAcid, "auto-acid", false, "auto detect acid")
 	flag.StringVar(&Acid, "acid", "", "specify acid value")
 	flag.BoolVar(&AutoEnc, "auto-enc", false, "auto detect enc")
+}
 
-	flag.Parse()
+func parseOnce() {
+	parsed.Lock()
+	if !parsed.done {
+		// 测试进程收到的是 go test 自己的 -test.* 参数，解析它们会让本包
+		// 直接退出。测试用 SetForTest 或直接给 Path 赋值，不需要命令行。
+		//
+		// 判断放在执行解析之前、只做一次：之后无论是否跳过都置位，避免
+		// 重复进入。
+		if !testing.Testing() {
+			flag.Parse()
+		}
+		parsed.done = true
+	}
+	parsed.Unlock()
+}
+
+// Parse 解析命令行参数，重复调用无副作用。
+//
+// 解析动作没有放在 init 里：init 阶段的 flag.Parse 会对任何不认识的参数
+// 直接退出，包括 go test 注入的 -test.* 标志，使本包及其下游无法被测试。
+// 因此改为由第一次真正需要参数值的调用方触发——即 config 包加载配置时
+// （见 config.Load）。解析必须发生在 config 的 init 读取 Path 之前，否则
+// -config 指定的路径会被忽略。
+func Parse() {
+	parseOnce()
+}
+
+// SetForTest 覆盖配置路径，仅在测试中使用。
+// 置位后 Parse 不再执行，避免测试进程的真实命令行覆盖这个值。
+func SetForTest(path string) {
+	Path = path
+
+	parsed.Lock()
+	parsed.done = true
+	parsed.Unlock()
 }
