@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# Runs after a settings change has been applied.
+#
+# Restarts the service so a port change takes effect. fnOS regenerates the
+# desktop entry from ${wizard_port} on its own; this only makes the process
+# listen on the same value.
+#
+# The previous process is stopped here rather than trusting config_init to
+# have done it: fnOS does not promise that both halves of the pair always run
+# (a settings API call may only invoke the callback), and starting while the
+# old process still holds the port would silently leave the change unapplied.
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+ensure_dirs || fail "cannot create ${TRIM_PKGVAR}"
+set_log_path
+
+stop_process || true
+
+port="$(resolve_port)"
+remember_port "${port}"
+
+start_process || fail "service failed to start on port ${port}"
+
+echo_to_logs "configuration applied, running on 127.0.0.1:${port}"
+
+exit 0

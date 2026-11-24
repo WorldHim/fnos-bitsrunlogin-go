@@ -1,0 +1,13 @@
+#!/bin/bash
+#
+# Runs after the package has been removed.
+#
+# Best effort only: the package files are gone by now, so the shared helpers
+# may not be available and anything still on disk belongs to fnOS. This logs
+# the fact that the removal finished so the installer log has a closing entry.
+
+set -u
+
+echo "bitsrunlogin-go removed at $(date '+%Y-%m-%d %H:%M:%S')"
+
+exit 0

@@ -1,0 +1,15 @@
+#!/bin/bash
+#
+# Runs before an upgrade replaces the package files.
+#
+# Stopping first means the new binary never contends with the old one for the
+# port, and the process is not running code that is about to be deleted.
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+stop_process || true
+exit 0

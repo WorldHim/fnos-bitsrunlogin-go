@@ -1,0 +1,26 @@
+#!/bin/bash
+#
+# Runs before a settings change is applied.
+#
+# The settings page exposes the port and nothing else, so this records the
+# value that is about to take effect and stops the service. The reverse of
+# the swap happens in config_callback. Doing it in two steps keeps the
+# window where the service is down as small as possible.
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+port="$(resolve_port)"
+new_port="${port}"
+
+if is_running; then
+	stop_process || true
+fi
+
+remember_port "${new_port}"
+echo_to_logs "configuration change requested, port ${new_port}"
+
+exit 0

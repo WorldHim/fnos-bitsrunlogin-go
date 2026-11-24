@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# Runs before the package files are applied.
+#
+# There is nothing to inspect on the target yet, so this only makes sure a
+# previous installation's process is not left holding the port.
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# During install the target directory does not contain our files yet, so the
+# shared helpers may be absent. Only stop a leftover process if they are here.
+if [[ -r "${SCRIPT_DIR}/common.sh" ]]; then
+	# shellcheck source=common.sh
+	source "${SCRIPT_DIR}/common.sh"
+	stop_process || true
+fi
+
+exit 0

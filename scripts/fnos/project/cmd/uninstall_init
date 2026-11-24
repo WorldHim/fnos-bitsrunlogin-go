@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# Runs before the package is removed.
+#
+# Stops the service and reports where the configuration lives, so a user who
+# removes the package without meaning to lose the account knows where to look.
+# The data itself is left alone here: fnOS decides what happens to
+# TRIM_PKGVAR after this script returns.
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+stop_process || true
+echo_to_logs "uninstalling; configuration remains at ${CONFIG_FILE} until the data directory is removed"
+
+exit 0

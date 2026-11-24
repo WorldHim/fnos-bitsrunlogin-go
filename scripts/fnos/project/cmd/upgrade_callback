@@ -1,0 +1,26 @@
+#!/bin/bash
+#
+# Runs after the new package files are in place.
+#
+# The configuration lives in TRIM_PKGVAR and is therefore untouched by the
+# upgrade, so the only repairs needed are the ones a new version may require:
+# the writable directories, a config file if the user had none, and the log
+# path if it still points at the old working directory.
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+ensure_dirs || fail "cannot create ${TRIM_PKGVAR}"
+
+write_default_config || fail "cannot write ${CONFIG_FILE}"
+set_log_path
+
+echo_to_logs "upgraded from ${TRIM_OLD_APPVER:-unknown} to ${TRIM_APPVER:-unknown}"
+
+# fnOS restarts the app itself after an upgrade when it was running before.
+# Starting here as well would race with that, so the script only ensures the
+# state is startable.
+exit 0

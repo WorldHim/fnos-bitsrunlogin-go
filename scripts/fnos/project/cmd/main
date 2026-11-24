@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# Start, stop and status for the appcenter.
+#
+# Exit codes follow the fnOS convention: 0 on success (and "running" for
+# status), 1 on failure, 3 for "not running".
+
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+case "${1:-}" in
+start)
+	ensure_dirs || fail "cannot create ${TRIM_PKGVAR}"
+	write_default_config
+	set_log_path
+	start_process || exit 1
+	;;
+stop)
+	stop_process || exit 1
+	;;
+restart)
+	stop_process || exit 1
+	start_process || exit 1
+	;;
+status)
+	if is_running; then
+		exit 0
+	fi
+	exit 3
+	;;
+*)
+	echo "usage: $0 {start|stop|restart|status}" >&2
+	exit 1
+	;;
+esac
+
+exit 0
