@@ -7,3 +7,8 @@
 /build
 /main*
 /*.code-workspace
+
+# fnOS packaging leftovers
+*.fpk
+.*.fpk-*
+scripts/fnos/project/target
