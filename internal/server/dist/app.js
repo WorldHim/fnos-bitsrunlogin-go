@@ -79,6 +79,23 @@
     return FIELD_LABELS[field] || field || '登录配置';
   }
 
+  // osName derives the portal's "name" field from the "os" one. The two
+  // travel together in the srun protocol - "Windows 10"/"windows" is the
+  // pairing the vendor client sends - so the UI edits os alone rather than
+  // letting the halves disagree. An unknown or empty os means no name.
+  var OS_NAMES = {
+    'Windows 10': 'windows',
+    'Windows 11': 'windows',
+    macOS: 'macos',
+    Android: 'android',
+    iOS: 'ios',
+    Linux: 'linux'
+  };
+
+  function osName(os) {
+    return OS_NAMES[os] || '';
+  }
+
   // --- api ----------------------------------------------------------------
 
   // basePath is the path the page is served under: "" when opened directly,
@@ -633,13 +650,29 @@
 
       var acidInput = input('text', meta.acid, { placeholder: '留空自动探测' });
       var encInput = input('text', meta.enc, { placeholder: '留空自动探测' });
-      var osInput = input('text', meta.os, { placeholder: 'Windows 10' });
+
+      // os and name are a pair describing the client the portal thinks it is
+      // talking to. They are only advisory - neither takes part in the
+      // checksum - so leaving them out is fine, and some campuses prefer it.
+      // Keeping them in one dropdown stops the two from drifting apart.
+      var osInput = select(
+        [
+          { value: '', label: '不指定' },
+          { value: 'Windows 10', label: 'Windows 10' },
+          { value: 'Windows 11', label: 'Windows 11' },
+          { value: 'macOS', label: 'macOS' },
+          { value: 'Android', label: 'Android' },
+          { value: 'iOS', label: 'iOS' },
+          { value: 'Linux', label: 'Linux' }
+        ],
+        meta.os
+      );
 
       form.appendChild(
         section('认证参数', [
           field('acid', acidInput, '留空则登录时自动探测；探测失败会提示手动填写'),
           field('enc', encInput, '留空则登录时自动探测；探测失败会提示手动填写'),
-          field('操作系统标识', osInput)
+          field('操作系统标识', osInput, '仅用于声明客户端类型，留空表示不指定')
         ])
       );
 
@@ -685,7 +718,7 @@
           acid: acidInput.value,
           enc: encInput.value,
           os: osInput.value,
-          name: meta.name,
+          name: osName(osInput.value),
           info_prefix: meta.info_prefix,
           double_stack: meta.double_stack
         };
