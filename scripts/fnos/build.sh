@@ -107,8 +107,26 @@ STAGE_DIR="${OUT_DIR}/${PACKAGE_NAME}-${PKG_VERSION}-${ARCH}"
 mkdir -p "${OUT_DIR}"
 
 # ---------------------------------------------------------------------------
-# 1. cross-compile
+# 1. sync the embedded web UI, then cross-compile
 # ---------------------------------------------------------------------------
+# go:embed reads internal/server/dist, which is a copy of web/ui. Syncing here
+# rather than trusting the committed copy means a forgotten sync cannot ship a
+# stale UI inside an otherwise correct binary.
+if command -v python3 >/dev/null 2>&1; then
+	PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+	PYTHON=python
+else
+	PYTHON=""
+fi
+
+if [[ -n "${PYTHON}" ]]; then
+	"${PYTHON}" "${SCRIPT_DIR}/sync-ui.py" || die "failed to sync the web UI" 2
+else
+	warn "python not found, embedding the committed copy of the web UI"
+	warn "run scripts/fnos/sync-ui.py after editing web/ui"
+fi
+
 log "compiling ${PACKAGE_NAME} for linux/${GOARCH_TARGET}"
 BIN_DIR="${OUT_DIR}/bin/${ARCH}"
 mkdir -p "${BIN_DIR}"

@@ -1,7 +1,25 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>BitSrunLoginGo</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BitSrunLoginGo</title>
+  <link rel="stylesheet" href="app.css">
+</head>
 <body>
-<p>Web UI 尚未构建。请先执行 <code>web/ui</code> 的构建流程，或使用官方发布的安装包。</p>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">BitSrunLoginGo</div>
+      <nav id="nav" class="nav"></nav>
+      <button id="theme" class="btn btn-ghost" title="切换深色模式" aria-label="切换深色模式">◐</button>
+    </div>
+  </header>
+
+  <main id="content" class="content"></main>
+
+  <div id="notify" class="toast-wrap" aria-live="polite"></div>
+
+  <script src="app.js"></script>
 </body>
 </html>
