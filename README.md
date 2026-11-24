@@ -12,6 +12,8 @@
 
 > 由社区贡献的图文教程见 [tutorials 分支](https://github.com/Mmx233/BitSrunLoginGo/tree/tutorials)
 
+> 飞牛 fnOS 用户可以直接安装 `.fpk`，在桌面图形界面里配置与查看状态，详见 [docs/fnos.md](docs/fnos.md)
+
 ## :gear:运行
 
 编译结果为可执行文件，下载 release 或编译后直接运行即可。如果你不知道 `windows_amd64_v4` 中的 `v4` 或 `linux_arm_hardfloat` 中的 `hardfloat` 意味着什么，选取没有这些后缀的有更高兼容性的默认版本即可
@@ -190,6 +192,15 @@ go build -trimpath -ldflags "-s -w -extldflags '-static -fpic'" ./cmd/bitsrun
 #消除命令行窗口
 go build -trimpath -ldflags "-s -w -extldflags '-static -fpic' -H windowsgui" ./cmd/bitsrun
 ```
+
+### 飞牛 fnOS 安装包
+
+```shell
+# 需要官方 fnpack 与 python，产物在 build/fnos/
+./scripts/fnos/build.sh --arch x86   # 或 --arch arm
+```
+
+详见 [docs/fnos.md](docs/fnos.md)。
 
 ## :jigsaw: 作为 module 使用
 
