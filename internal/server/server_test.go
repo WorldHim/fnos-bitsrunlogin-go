@@ -1,0 +1,342 @@
+package server
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	log "github.com/sirupsen/logrus"
+)
+
+// quietLogger returns a logger that discards output so test runs stay readable.
+func quietLogger() *log.Logger {
+	l := log.New()
+	l.SetLevel(log.PanicLevel)
+	return l
+}
+
+func newTestServer(t *testing.T, content string) (*Server, string) {
+	t.Helper()
+	if content == "" {
+		content = testConfig
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	srv, err := New(Options{
+		Addr:       "127.0.0.1:0",
+		ConfigPath: path,
+		Logger:     quietLogger(),
+		Version:    "test",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return srv, path
+}
+
+func doRequest(t *testing.T, h http.Handler, method, target string, body string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	for k, v := range headers {
+		r.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+func TestVersionEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/version", "", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp versionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Version != "test" {
+		t.Errorf("version = %q, want test", resp.Version)
+	}
+	if resp.GoVersion == "" {
+		t.Error("go_version must not be empty")
+	}
+}
+
+func TestStatusEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/status", "", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp statusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Supervisor.State == "" {
+		t.Error("supervisor state must be reported")
+	}
+	if resp.Form.Username == "" {
+		t.Error("form summary is missing")
+	}
+	if strings.Contains(w.Body.String(), "s3cr3t-value") {
+		t.Error("status endpoint must not leak the password")
+	}
+}
+
+func TestGetConfigEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/config", "", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "s3cr3t-value") {
+		t.Error("config endpoint must not leak the password")
+	}
+	var view ConfigView
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !view.Form.HasPassword {
+		t.Error("has_password should be true")
+	}
+}
+
+func TestPutConfigRequiresJSONContentType(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodPut, "/api/config", `{}`, map[string]string{
+		"Content-Type": "text/plain",
+	})
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("status = %d, want 415", w.Code)
+	}
+}
+
+func TestPutConfigRejectsCrossOrigin(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodPut, "/api/config",
+		`{"form":{"username":"evil"}}`,
+		map[string]string{
+			"Content-Type": "application/json",
+			"Origin":       "http://evil.example",
+		})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestPutConfigRejectsUnknownFields(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodPut, "/api/config",
+		`{"form":{"username":"bob"},"bogus":1}`,
+		map[string]string{"Content-Type": "application/json"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestPutConfigUpdatesAndPreservesSecrets(t *testing.T) {
+	srv, path := newTestServer(t, "")
+
+	w := doRequest(t, srv.Handler(), http.MethodPut, "/api/config",
+		`{"form":{"username":"bob"}}`,
+		map[string]string{"Content-Type": "application/json"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), "bob") {
+		t.Errorf("saved config does not contain the new username: %s", data)
+	}
+	if !strings.Contains(string(data), "s3cr3t-value") {
+		t.Error("save dropped the password that the patch did not mention")
+	}
+}
+
+func TestPutConfigRejectsInvalidValues(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodPut, "/api/config",
+		`{"form":{"domain":""}}`,
+		map[string]string{"Content-Type": "application/json"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestServiceEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/service", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var svc serviceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &svc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if svc.State != "stopped" {
+		t.Errorf("initial state = %q, want stopped", svc.State)
+	}
+
+	w = doRequest(t, srv.Handler(), http.MethodPost, "/api/service/start", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("start status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// Starting twice is not an error: the UI may retry.
+	w = doRequest(t, srv.Handler(), http.MethodPost, "/api/service/start", "", nil)
+	if w.Code != http.StatusOK {
+		t.Errorf("second start status = %d, want 200", w.Code)
+	}
+
+	w = doRequest(t, srv.Handler(), http.MethodPost, "/api/service/stop", "", nil)
+	if w.Code != http.StatusOK && w.Code != http.StatusAccepted {
+		t.Errorf("stop status = %d, want 200 or 202", w.Code)
+	}
+}
+
+func TestLogsEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	srv.logs.append(logEntry{Level: "info", Message: "hello"})
+
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/logs?limit=10", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp logsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].Message != "hello" {
+		t.Errorf("entries = %+v, want one entry saying hello", resp.Entries)
+	}
+	if resp.LastSeq == 0 {
+		t.Error("last_seq must be reported for paging")
+	}
+
+	w = doRequest(t, srv.Handler(), http.MethodGet, "/api/logs?after="+itoa(resp.LastSeq), "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("paged status = %d, want 200", w.Code)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Entries) != 0 {
+		t.Errorf("expected no new entries, got %+v", resp.Entries)
+	}
+}
+
+func TestUnknownAPIRouteDoesNotServeIndex(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/nope", "", nil)
+
+	// The SPA fallback would answer 200 with index.html, which hides routing
+	// bugs from the front end; /api must stay JSON-only.
+	if w.Code == http.StatusOK && strings.Contains(w.Body.String(), "<html") {
+		t.Error("/api/* must not fall back to the SPA shell")
+	}
+}
+
+func TestUIRootServesIndex(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/", "", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("content type = %q, want text/html", w.Header().Get("Content-Type"))
+	}
+}
+
+func TestSPAFallbackServesIndexForDeepLink(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/settings/advanced", "", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SPA fallback)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "<html") {
+		t.Errorf("expected the shell, got %s", w.Body.String())
+	}
+}
+
+// itoa avoids importing strconv in the test for one call.
+func itoa(v uint64) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(buf[i:])
+}
+
+func TestLogHookCapturesFromFieldLogger(t *testing.T) {
+	// Regression test: the server is given a *logrus.Entry, and an
+	// implementation that only type-asserts *logrus.Logger silently never
+	// fires, leaving the log page permanently empty.
+	logger := log.New()
+	logger.SetLevel(log.InfoLevel)
+	logger.SetOutput(io.Discard)
+
+	srv, err := New(Options{
+		Addr:       "127.0.0.1:0",
+		ConfigPath: filepath.Join(t.TempDir(), "Config.yaml"),
+		Logger:     logger.WithField("comp", "server"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	logger.Info("hello from the hook")
+
+	entries, _ := srv.logs.snapshot(10)
+	if len(entries) == 0 {
+		t.Fatal("the hook did not capture the entry")
+	}
+	if !strings.Contains(entries[0].Message, "hello from the hook") {
+		t.Errorf("message = %q, want it to contain the log line", entries[0].Message)
+	}
+
+	// The component prefix comes from the "comp" field, which only entries
+	// derived from WithField carry. This is how the program logs.
+	fieldLogger := logger.WithField("comp", "login")
+	fieldLogger.Warn("through a field logger")
+
+	entries, _ = srv.logs.snapshot(10)
+	found := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Message, "login:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("entries = %+v, want one prefixed with the comp field", entries)
+	}
+}
