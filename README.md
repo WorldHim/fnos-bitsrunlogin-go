@@ -2,7 +2,6 @@
 
 [![Lisense](https://img.shields.io/github/license/Mmx233/BitSrunLoginGo)](https://github.com/Mmx233/BitSrunLoginGo/blob/main/LICENSE)
 [![Release](https://img.shields.io/github/v/release/Mmx233/BitSrunLoginGo?color=blueviolet&include_prereleases)](https://github.com/Mmx233/BitSrunLoginGo/releases)
-[![Dockerhub](https://img.shields.io/docker/pulls/mmx233/bitsrunlogin-go)](https://hub.docker.com/repository/docker/mmx233/bitsrunlogin-go)
 
 深澜校园网登录脚本 Go 语言版。GO 语言可以直接交叉编译出 mips 架构可执行程序（路由器）（主流平台更不用说了），从而免除安装环境。
 
@@ -16,7 +15,7 @@
 
 ## :gear:运行
 
-编译结果为可执行文件，下载 release 或编译后直接运行即可。如果你不知道 `windows_amd64_v4` 中的 `v4` 或 `linux_arm_hardfloat` 中的 `hardfloat` 意味着什么，选取没有这些后缀的有更高兼容性的默认版本即可
+编译结果为可执行文件，下载 release 或编译后直接运行即可。如果你不知道 `v4` 或 `linux_arm_hardfloat` 中的 `hardfloat` 意味着什么，选取没有这些后缀的有更高兼容性的默认版本即可
 
 首次运行将自动生成配置文件，首次使用建议开启调试日志（`settings.log.debug_level` 设为 `true` 或使用 flag `--debug`），可以通过添加启动参数 `--config` 指定配置文件路径，默认为当前目录的 `Config.yaml`
 
@@ -131,32 +130,6 @@ settings:
 你可以通过配置文件中的 `settings.basic.interfaces` 指定网卡，也可以在将该配置留空的情况下使用 `--interface` 指定网卡。
 
 如果需要让指定网卡使用不同的登录参数，可以在 `settings.interface_forms` 中按网卡名称覆盖全局 `form`。该配置对 `--interface` 指定的单张网卡和 `settings.basic.interfaces` 匹配的多张网卡均生效，但在未指定网卡的单网卡模式下不生效。
-
-## :anchor: Docker / Kubernetes
-
-镜像：`mmx233/bitsrunlogin-go`
-
-支持架构：`linux/amd64` `linux/386` `linux/arm64` `linux/arm/v7` `linux/arm/v6` `linux/ppc64le` `linux/riscv64` `linux/s390x` 
-
-在集群中使用时建议使用固定 tag 而不是 latest 以锁定版本。你可以在 [Dockerhub](https://hub.docker.com/repository/docker/mmx233/bitsrunlogin-go) 找到现在最新的 Tag
-
-直接使用：
-
-配置文件挂载至 `/data/Config.yaml`，若需更改配置文件类型，可以使用覆写启动参数以指定自定义路径和后缀
-
-```shell
-docker run -v path_to_config:/data/Config.yaml mmx233/bitsrunlogin-go:latest
-```
-
-自行构建：
-
-如果需要在其他系统或架构使用，可能需要更改构建层与底层镜像，目前使用的 alpine 并不支持 linux 之外的系统
-
-```shell
-git clone https://github.com/Mmx233/BitSrunLoginGo.git
-cd BitSrunLoginGo
-docker build . --file Dockerfile --tag mmx233/bitsrunlogin-go:latest
-```
 
 ## :hammer_and_wrench:构建
 
