@@ -20,6 +20,14 @@ var (
 	AutoAcid  bool
 	Acid      string
 	AutoEnc   bool
+
+	// Server 启动 Web 控制服务而不是直接执行登录流程。
+	Server bool
+
+	// ServerAddr 控制服务的监听地址。默认只监听回环地址：服务没有独立的
+	// 登录鉴权，靠 fnOS 桌面窗口反代访问，暴露到局域网等于把配置和账号
+	// 交给所有人。
+	ServerAddr string
 )
 
 func init() {
@@ -30,6 +38,9 @@ func init() {
 	flag.BoolVar(&AutoAcid, "auto-acid", false, "auto detect acid")
 	flag.StringVar(&Acid, "acid", "", "specify acid value")
 	flag.BoolVar(&AutoEnc, "auto-enc", false, "auto detect enc")
+
+	flag.BoolVar(&Server, "server", false, "run the web control server instead of a single login")
+	flag.StringVar(&ServerAddr, "server-addr", "127.0.0.1:9877", "listen address for -server")
 }
 
 func parseOnce() {
@@ -59,10 +70,12 @@ func Parse() {
 	parseOnce()
 }
 
-// SetForTest 覆盖配置路径，仅在测试中使用。
-// 置位后 Parse 不再执行，避免测试进程的真实命令行覆盖这个值。
-func SetForTest(path string) {
+// SetForTest 覆盖参数值，仅在测试中使用。
+// 置位后 Parse 不再执行，避免测试进程的真实命令行覆盖这些值。
+func SetForTest(path, serverAddr string, server bool) {
 	Path = path
+	ServerAddr = serverAddr
+	Server = server
 
 	parsed.Lock()
 	parsed.done = true

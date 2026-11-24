@@ -12,6 +12,13 @@ func main() {
 	// 注意 config 包在 init 中完成加载，因此此调用必须位于 main 的第一条语句。
 	flags.Parse()
 
+	// 服务模式提供 Web 控制界面，用于无法在安装向导里填完所有参数的环境
+	// （例如飞牛 fnOS 包）。未指定时行为与之前完全一致。
+	if flags.Server {
+		runServer()
+		return
+	}
+
 	logger := config.Logger
 	if config.Settings.Basic.Interfaces != "" {
 		logger.Infoln("[多网卡模式]")
