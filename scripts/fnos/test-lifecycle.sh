@@ -181,6 +181,14 @@ done
 	ok "service restarted on the new port" ||
 	bad "service restarted on the new port" "$(tr '\n' ' ' <"${TRIM_PKGVAR}/argv.txt" 2>/dev/null)"
 
+# A plain start must not touch the recorded port. If it did, a start that
+# runs while a settings change is in flight would put the previous value back
+# and the service would come up on the port it was just moved off.
+echo "a bare start leaves the recorded port alone"
+bash "${MAIN}" stop >/dev/null 2>&1
+bash "${MAIN}" start >/dev/null 2>&1
+check_eq "18081" "$(cat "${TRIM_PKGVAR}/port")" "start does not rewrite the recorded port"
+
 echo "config_init stops the service"
 wizard_port="18082" bash "${ROOT}/cmd/config_init" >/dev/null 2>&1
 check_status 0 $? "config_init succeeds"

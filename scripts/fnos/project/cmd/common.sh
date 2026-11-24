@@ -216,9 +216,36 @@ resolve_port() {
 	printf '%s' "${port}"
 }
 
+# resolve_port picks the port the service should listen on.
+#
+# The wizard value wins when it is present, because that is the most recent
+# thing the user typed. The remembered value from an earlier run is the fall
+# back. An empty or impossible value is never accepted: this is the number
+# that actually gets bound, so a typo caught here is better than a service
+# that starts on a port the desktop entry does not point at.
+resolve_port() {
+	local port="${wizard_port:-}"
+	[[ -z "${port}" ]] && port="$(cat "${TRIM_PKGVAR}/port" 2>/dev/null | tr -d '[:space:]')"
+	[[ -z "${port}" ]] && port="${DEFAULT_PORT}"
+
+	if ! [[ "${port}" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
+		echo_to_logs "invalid port '${port}', falling back to ${DEFAULT_PORT}"
+		port="${DEFAULT_PORT}"
+	fi
+
+	printf '%s' "${port}"
+}
+
 # remember_port stores the resolved port so later script runs (start, config
 # callback) agree with the one the desktop entry was generated with.
+#
+# Only the wizard value is authoritative. A plain `main start` has no
+# wizard_port at all, so writing back whatever resolve_port produced would
+# record the old value again and, when it runs while a settings change is in
+# flight, overwrite the new one that config_init already stored. Callers
+# therefore skip this unless they were handed a port explicitly.
 remember_port() {
+	[[ -n "${1:-}" ]] || return 0
 	mkdir -p "${TRIM_PKGVAR}" 2>/dev/null || return 0
 	printf '%s\n' "$1" >"${TRIM_PKGVAR}/port" 2>/dev/null || true
 	return 0
@@ -355,7 +382,9 @@ start_process() {
 
 	local port
 	port="$(resolve_port)"
-	remember_port "${port}"
+	# Only record the port when the wizard supplied it: a bare `main start`
+	# must not write back the value it merely read.
+	remember_port "${wizard_port:-}"
 
 	echo_to_logs "starting on 127.0.0.1:${port}"
 

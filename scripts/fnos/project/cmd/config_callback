@@ -23,7 +23,10 @@ set_log_path
 stop_process || true
 
 port="$(resolve_port)"
-remember_port "${port}"
+# config_init already stored the new value when both halves run. Writing it
+# again from here would be harmless, but doing it only when the wizard
+# actually supplied a port keeps a lone callback from pinning a stale one.
+remember_port "${wizard_port:-}"
 
 start_process || fail "service failed to start on port ${port}"
 

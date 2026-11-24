@@ -20,7 +20,13 @@ if is_running; then
 	stop_process || true
 fi
 
-remember_port "${new_port}"
+# Store the port that is about to take effect, so a callback that runs without
+# a wizard value still finds the new one instead of the previous value.
+if [[ -n "${wizard_port:-}" ]]; then
+	remember_port "${wizard_port}"
+else
+	remember_port "${new_port}"
+fi
 echo_to_logs "configuration change requested, port ${new_port}"
 
 exit 0
