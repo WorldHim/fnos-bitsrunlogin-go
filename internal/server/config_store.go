@@ -98,18 +98,48 @@ func (c *ConfigStore) Save(conf *config.ConfFromFile) error {
 	return config.Load(c.path, false)
 }
 
+// MissingFieldError reports the first required setting that is empty. It is
+// what tells a fresh install apart from a configured one: the package ships
+// defaults, and logging in with an empty account only produces a confusing
+// parse error from the campus portal.
+type MissingFieldError struct {
+	Field string
+}
+
+func (e *MissingFieldError) Error() string {
+	return e.Field + " is required"
+}
+
+// Is lets callers treat a missing field as ErrInvalidConfig.
+func (e *MissingFieldError) Is(target error) bool {
+	return target == ErrInvalidConfig
+}
+
+// CheckConfigured reports the first required login setting that is missing.
+//
+// The default configuration written on first install leaves the account empty,
+// so the service must not start the login loop until this returns nil.
+func CheckConfigured(conf *config.ConfFromFile) error {
+	if conf == nil {
+		return &MissingFieldError{Field: "form"}
+	}
+	if strings.TrimSpace(conf.Form.Domain) == "" {
+		return &MissingFieldError{Field: "form.domain"}
+	}
+	if strings.TrimSpace(conf.Form.Username) == "" {
+		return &MissingFieldError{Field: "form.username"}
+	}
+	if conf.Form.Password == "" {
+		return &MissingFieldError{Field: "form.password"}
+	}
+	return nil
+}
+
 // validate nudges the defaults and rejects configurations that would make the
 // login loop fail later in a confusing way, such as an empty password.
 func validate(conf *config.ConfFromFile) error {
-	form := conf.Form
-	if strings.TrimSpace(form.Domain) == "" {
-		return fmt.Errorf("%w: form.domain is required", ErrInvalidConfig)
-	}
-	if strings.TrimSpace(form.Username) == "" {
-		return fmt.Errorf("%w: form.username is required", ErrInvalidConfig)
-	}
-	if form.Password == "" {
-		return fmt.Errorf("%w: form.password is required", ErrInvalidConfig)
+	if err := CheckConfigured(conf); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidConfig, err)
 	}
 
 	settings := conf.Settings

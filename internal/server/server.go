@@ -377,16 +377,23 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	// The login loop is started before serving so that the UI never sees a
 	// stopped loop that the operator did not stop.
-	if s.opts.AutoStart && !config.Settings.Guardian.Enable {
-		// With guardian disabled the CLI performs a single login; mirror that
-		// instead of looping behind the user's back.
-		go func() {
-			if err := s.sup.RunOnce(ctx); err != nil {
-				s.logger.Warnln("initial login failed:", err)
-			}
-		}()
-	} else if s.opts.AutoStart {
-		if err := s.sup.Start(); err != nil && !errors.Is(err, supervisor.ErrAlreadyRunning) {
+	//
+	// A fresh install has no account yet. Logging in with it would hit the
+	// campus portal with an empty username and surface a JSON parse error from
+	// whatever the portal answers, so stay idle and let the UI ask for the
+	// settings instead.
+	if s.opts.AutoStart {
+		if err := s.checkConfigured(); err != nil {
+			s.logger.Infoln("login not started:", err, "- open the app and fill in the account settings")
+		} else if !config.Settings.Guardian.Enable {
+			// With guardian disabled the CLI performs a single login; mirror that
+			// instead of looping behind the user's back.
+			go func() {
+				if err := s.sup.RunOnce(ctx); err != nil {
+					s.logger.Warnln("initial login failed:", err)
+				}
+			}()
+		} else if err := s.sup.Start(); err != nil && !errors.Is(err, supervisor.ErrAlreadyRunning) {
 			s.logger.Warnln("start login loop:", err)
 		}
 	}

@@ -36,6 +36,12 @@ type statusResponse struct {
 	Form       FormView          `json:"form"`
 	DDNS       DdnsView          `json:"ddns"`
 	Interfaces string            `json:"interfaces"`
+	// Configured is false until the required login settings are present. A
+	// fresh install ships defaults with no account, and the UI turns this into
+	// a prompt instead of letting the loop fail against the campus portal.
+	Configured    bool   `json:"configured"`
+	MissingField  string `json:"missing_field,omitempty"`
+	ConfigMissing bool   `json:"config_missing,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +69,20 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Interfaces = config.Settings.Basic.Interfaces
 	}
+
+	// Report readiness from the file the UI writes. A missing field is not an
+	// error here: it is the normal state of a fresh install.
+	if conf, err := s.store.Load(); err != nil {
+		resp.ConfigMissing = true
+	} else if err := CheckConfigured(conf); err != nil {
+		var missing *MissingFieldError
+		if errors.As(err, &missing) {
+			resp.MissingField = missing.Field
+		}
+	} else {
+		resp.Configured = true
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

@@ -456,3 +456,51 @@ func TestGatewayPrefixKeepsAPI404(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", w.Header().Get("Content-Type"))
 	}
 }
+
+func TestStatusReportsConfigured(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/status", "", nil)
+
+	var resp statusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Configured {
+		t.Error("configured = false, want true for a complete config")
+	}
+	if resp.MissingField != "" {
+		t.Errorf("missing_field = %q, want empty", resp.MissingField)
+	}
+}
+
+func TestStatusReportsMissingAccount(t *testing.T) {
+	// A fresh install: the defaults ship without an account.
+	fresh := `form:
+  domain: ""
+  username: ""
+  user_type: cmcc
+  password: ""
+settings:
+  basic:
+    timeout: 5
+  guardian:
+    enable: true
+    duration: 300
+`
+	srv, _ := newTestServer(t, fresh)
+	w := doRequest(t, srv.Handler(), http.MethodGet, "/api/status", "", nil)
+
+	var resp statusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Configured {
+		t.Error("configured = true, want false before the account is filled in")
+	}
+	if resp.MissingField != "form.domain" {
+		t.Errorf("missing_field = %q, want form.domain", resp.MissingField)
+	}
+	if resp.Supervisor.State == "running" {
+		t.Error("the login loop must not run before the account is configured")
+	}
+}

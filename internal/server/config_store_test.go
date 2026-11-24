@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Mmx233/BitSrunLoginGo/internal/config"
+	"github.com/Mmx233/BitSrunLoginGo/pkg/srun"
 )
 
 func TestLogBufferDropsOldestWhenFull(t *testing.T) {
@@ -303,5 +305,73 @@ func TestJSONAndYAMLAreBothSupported(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"username"`) {
 		t.Errorf("saved file does not look like JSON: %s", data)
+	}
+}
+
+func TestCheckConfiguredAcceptsCompleteConfig(t *testing.T) {
+	conf := &config.ConfFromFile{
+		Form: srun.LoginForm{
+			Domain:   "portal.example.com",
+			Username: "alice",
+			Password: "secret",
+		},
+	}
+	if err := CheckConfigured(conf); err != nil {
+		t.Fatalf("CheckConfigured: %v", err)
+	}
+}
+
+func TestCheckConfiguredReportsMissingFields(t *testing.T) {
+	cases := []struct {
+		name string
+		form srun.LoginForm
+		want string
+	}{
+		{"empty", srun.LoginForm{}, "form.domain"},
+		{"no domain", srun.LoginForm{Username: "a", Password: "b"}, "form.domain"},
+		{"blank domain", srun.LoginForm{Domain: "  ", Username: "a", Password: "b"}, "form.domain"},
+		{"no username", srun.LoginForm{Domain: "d", Password: "b"}, "form.username"},
+		{"no password", srun.LoginForm{Domain: "d", Username: "a"}, "form.password"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckConfigured(&config.ConfFromFile{Form: tc.form})
+			if err == nil {
+				t.Fatalf("CheckConfigured: want %s error, got nil", tc.want)
+			}
+			var missing *MissingFieldError
+			if !errors.As(err, &missing) {
+				t.Fatalf("CheckConfigured: error %v is not a MissingFieldError", err)
+			}
+			if missing.Field != tc.want {
+				t.Errorf("missing field = %q, want %q", missing.Field, tc.want)
+			}
+			if !errors.Is(err, ErrInvalidConfig) {
+				t.Error("a missing field must satisfy errors.Is(err, ErrInvalidConfig)")
+			}
+		})
+	}
+}
+
+func TestCheckConfiguredRejectsNilConfig(t *testing.T) {
+	if err := CheckConfigured(nil); err == nil {
+		t.Fatal("CheckConfigured(nil) must fail")
+	}
+}
+
+func TestSaveRejectsMissingFieldAsInvalidConfig(t *testing.T) {
+	store := NewConfigStore(writeTestConfig(t, testConfig))
+	conf, err := store.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	conf.Form.Username = ""
+
+	err = store.Save(conf)
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Save: error %v, want ErrInvalidConfig", err)
+	}
+	if !strings.Contains(err.Error(), "form.username") {
+		t.Errorf("Save: error %q should name the missing field", err)
 	}
 }
