@@ -344,6 +344,12 @@ func (p *ConfigPatch) Apply(conf *config.ConfFromFile) {
 
 	if p.Meta != nil {
 		conf.Meta = *p.Meta
+		if conf.Meta.OS == "" {
+			// os and name describe the same thing; a name without an os
+			// tells the portal nothing and is just stale state from an
+			// earlier save.
+			conf.Meta.Name = ""
+		}
 	}
 
 	if p.Settings == nil {

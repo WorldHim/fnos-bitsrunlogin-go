@@ -279,6 +279,37 @@ func TestPatchReplacesSecretsWhenProvided(t *testing.T) {
 	}
 }
 
+func TestPatchKeepsOSNameAsGiven(t *testing.T) {
+	conf := &config.ConfFromFile{}
+
+	meta := srun.LoginMeta{OS: "Windows 10", Name: "windows"}
+	patch := ConfigPatch{Meta: &meta}
+	patch.Apply(conf)
+
+	if conf.Meta.OS != "Windows 10" || conf.Meta.Name != "windows" {
+		t.Errorf("meta = %q/%q, want Windows 10/windows", conf.Meta.OS, conf.Meta.Name)
+	}
+}
+
+func TestPatchDropsNameWhenOSIsEmpty(t *testing.T) {
+	conf := &config.ConfFromFile{}
+	conf.Meta.OS = "Windows 10"
+	conf.Meta.Name = "windows"
+
+	// A client that clears os but keeps the old name would otherwise leave
+	// the two fields describing different things.
+	meta := srun.LoginMeta{OS: "", Name: "windows"}
+	patch := ConfigPatch{Meta: &meta}
+	patch.Apply(conf)
+
+	if conf.Meta.OS != "" {
+		t.Errorf("os = %q, want empty", conf.Meta.OS)
+	}
+	if conf.Meta.Name != "" {
+		t.Errorf("name = %q, want cleared with os", conf.Meta.Name)
+	}
+}
+
 func TestJSONAndYAMLAreBothSupported(t *testing.T) {
 	dir := t.TempDir()
 	jsonPath := filepath.Join(dir, "Config.json")
