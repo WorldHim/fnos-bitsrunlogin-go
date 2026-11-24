@@ -631,14 +631,14 @@
       var reality = s.reality || {};
       var headers = s.custom_header || {};
 
-      var acidInput = input('text', meta.acid, { placeholder: '5' });
-      var encInput = input('text', meta.enc, { placeholder: 'srun_bx1' });
+      var acidInput = input('text', meta.acid, { placeholder: '留空自动探测' });
+      var encInput = input('text', meta.enc, { placeholder: '留空自动探测' });
       var osInput = input('text', meta.os, { placeholder: 'Windows 10' });
 
       form.appendChild(
         section('认证参数', [
-          field('acid', acidInput, '不确定时保持默认，或使用 -auto-acid 自动探测'),
-          field('enc', encInput, '不确定时保持默认，或使用 -auto-enc 自动探测'),
+          field('acid', acidInput, '留空则登录时自动探测；探测失败会提示手动填写'),
+          field('enc', encInput, '留空则登录时自动探测；探测失败会提示手动填写'),
           field('操作系统标识', osInput)
         ])
       );
