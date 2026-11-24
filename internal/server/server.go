@@ -301,7 +301,7 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			}
 		}()
 
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !s.allowWrite(r) {
 			writeError(w, http.StatusForbidden, "cross-origin request rejected")
 			return
 		}
@@ -330,6 +330,22 @@ func (r *statusRecorder) WriteHeader(code int) {
 // reach 127.0.0.1, so a form on any website would otherwise be able to change
 // the configuration. Requests without an Origin header (curl, the desktop
 // shell) are allowed.
+// allowWrite reports whether a request that changes state may proceed.
+//
+// Behind the fnOS gateway the browser cannot reach this process directly: the
+// request only arrives after the gateway has checked the user's session, and
+// it may rewrite Host along the way, so comparing Origin with Host would
+// reject perfectly good writes. The gateway is the CSRF boundary there.
+//
+// Anywhere else - a directly reachable port - nothing else vouches for the
+// caller, so the Origin check stays.
+func (s *Server) allowWrite(r *http.Request) bool {
+	if s.gatewayPrefix() != "" {
+		return true
+	}
+	return sameOrigin(r)
+}
+
 func sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

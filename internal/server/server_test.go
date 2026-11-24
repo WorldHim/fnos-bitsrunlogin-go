@@ -445,6 +445,29 @@ func TestGatewayPrefixResolvesAssetsUnderDeepLinkBase(t *testing.T) {
 
 // An unknown API path under the prefix must still answer with the JSON 404
 // rather than the SPA shell.
+func TestGatewayPrefixAcceptsWritesFromAnyOrigin(t *testing.T) {
+	// The gateway rewrites Host, so an Origin/Host comparison would reject
+	// writes that the gateway already authorised.
+	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
+
+	w := doRequest(t, srv.Handler(), "POST", "/app/bitsrunlogin-go/api/service/stop", "",
+		map[string]string{"Origin": "https://nas.example.com"})
+	if w.Code == http.StatusForbidden {
+		t.Fatalf("write was rejected: %s", w.Body.String())
+	}
+}
+
+func TestDirectWritesStillCheckOrigin(t *testing.T) {
+	// Without the gateway, nothing else vouches for the caller.
+	srv, _ := newTestServer(t, "")
+
+	w := doRequest(t, srv.Handler(), "POST", "/api/service/stop", "",
+		map[string]string{"Origin": "https://evil.example.com"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin write status = %d, want 403", w.Code)
+	}
+}
+
 func TestGatewayPrefixKeepsAPI404(t *testing.T) {
 	srv, _ := newTestServerOpts(t, "", Options{GatewayPrefix: "/app/bitsrunlogin-go"})
 
