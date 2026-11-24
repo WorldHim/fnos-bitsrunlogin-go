@@ -4,9 +4,10 @@
       "title": "深澜校园网登录",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
-      "protocol": "http",
-      "port": "${wizard_port}",
-      "url": "/",
+      "protocol": "",
+      "gatewayPrefix": "/app/bitsrunlogin-go",
+      "gatewaySocket": "app.sock",
+      "url": "/app/bitsrunlogin-go",
       "allUsers": true,
       "control": {
         "accessPerm": "editable"

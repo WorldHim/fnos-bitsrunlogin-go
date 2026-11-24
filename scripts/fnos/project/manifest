@@ -16,5 +16,3 @@ desktop_uidir         = ui
 desktop_applaunchname = bitsrunlogin-go.main
 
 ctl_stop              = true
-checkport             = true
-service_port          = 9877

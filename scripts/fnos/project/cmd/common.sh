@@ -38,12 +38,18 @@ PID_FILE="${TRIM_PKGVAR}/app.pid"
 LOG_FILE="${TRIM_PKGVAR}/info.log"
 BITS_LOG_DIR="${TRIM_PKGVAR}/logs"
 
+# The fnOS gateway forwards to a Unix socket inside the installed app directory.
+# A loopback TCP port would not work: the desktop opens the entry in an iframe
+# rendered by the user's browser, where 127.0.0.1 is the user's own machine and
+# not the NAS.
+GATEWAY_SOCKET="${APP_DEST}/app.sock"
+GATEWAY_PREFIX="/app/${APP_NAME}"
+SERVER_ADDR="unix:${GATEWAY_SOCKET}"
+
 # Runtime user. The package declares run-as=package, so the scripts drop to
 # the package user explicitly rather than relying on how fnOS invokes them.
 : "${TRIM_USERNAME:=${APP_NAME}}"
 : "${TRIM_RUN_USERNAME:=${TRIM_USERNAME}}"
-
-DEFAULT_PORT=9877
 
 # --- logging ----------------------------------------------------------------
 
@@ -196,58 +202,20 @@ set_log_path() {
 	return 0
 }
 
-# --- port -------------------------------------------------------------------
+# --- gateway ----------------------------------------------------------------
 
-# resolve_port determines the listening port, preferring the value collected
-# by the wizard and falling back to the manifest default.
-#
-# The wizard field is named wizard_port so it arrives as $wizard_port. It is
-# re-validated here because values from a form are untrusted input.
-resolve_port() {
-	local port="${wizard_port:-}"
-	[[ -z "${port}" ]] && port="$(cat "${TRIM_PKGVAR}/port" 2>/dev/null | tr -d '[:space:]')"
-	[[ -z "${port}" ]] && port="${DEFAULT_PORT}"
+# The service listens on a Unix socket rather than a port. fnOS publishes it at
+# GATEWAY_PREFIX and forwards there, which is what lets the desktop entry work
+# from a browser on another machine.
 
-	if ! [[ "${port}" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
-		echo_to_logs "invalid port '${port}', falling back to ${DEFAULT_PORT}"
-		port="${DEFAULT_PORT}"
+# clear_gateway_socket removes a socket left behind by a previous run, so a
+# restart does not trip over it. A socket that still answers is left alone.
+clear_gateway_socket() {
+	[[ -S "${GATEWAY_SOCKET}" ]] || return 0
+	if command -v socat >/dev/null 2>&1; then
+		socat -u "OPEN:${GATEWAY_SOCKET}" /dev/null 2>/dev/null && return 0
 	fi
-
-	printf '%s' "${port}"
-}
-
-# resolve_port picks the port the service should listen on.
-#
-# The wizard value wins when it is present, because that is the most recent
-# thing the user typed. The remembered value from an earlier run is the fall
-# back. An empty or impossible value is never accepted: this is the number
-# that actually gets bound, so a typo caught here is better than a service
-# that starts on a port the desktop entry does not point at.
-resolve_port() {
-	local port="${wizard_port:-}"
-	[[ -z "${port}" ]] && port="$(cat "${TRIM_PKGVAR}/port" 2>/dev/null | tr -d '[:space:]')"
-	[[ -z "${port}" ]] && port="${DEFAULT_PORT}"
-
-	if ! [[ "${port}" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
-		echo_to_logs "invalid port '${port}', falling back to ${DEFAULT_PORT}"
-		port="${DEFAULT_PORT}"
-	fi
-
-	printf '%s' "${port}"
-}
-
-# remember_port stores the resolved port so later script runs (start, config
-# callback) agree with the one the desktop entry was generated with.
-#
-# Only the wizard value is authoritative. A plain `main start` has no
-# wizard_port at all, so writing back whatever resolve_port produced would
-# record the old value again and, when it runs while a settings change is in
-# flight, overwrite the new one that config_init already stored. Callers
-# therefore skip this unless they were handed a port explicitly.
-remember_port() {
-	[[ -n "${1:-}" ]] || return 0
-	mkdir -p "${TRIM_PKGVAR}" 2>/dev/null || return 0
-	printf '%s\n' "$1" >"${TRIM_PKGVAR}/port" 2>/dev/null || true
+	rm -f "${GATEWAY_SOCKET}" 2>/dev/null || true
 	return 0
 }
 
@@ -380,13 +348,10 @@ start_process() {
 
 	[[ -x "${APP_BIN}" ]] || fail "binary missing or not executable: ${APP_BIN}"
 
-	local port
-	port="$(resolve_port)"
-	# Only record the port when the wizard supplied it: a bare `main start`
-	# must not write back the value it merely read.
-	remember_port "${wizard_port:-}"
+	# A socket left by a previous run makes the bind fail, so clear it first.
+	clear_gateway_socket
 
-	echo_to_logs "starting on 127.0.0.1:${port}"
+	echo_to_logs "starting on ${SERVER_ADDR}, published at ${GATEWAY_PREFIX}"
 
 	# The server appends its own output here; the web UI reads the same
 	# information from the in-memory log buffer, so this file is for
@@ -411,7 +376,7 @@ start_process() {
 	# process that is already gone. Recording that pid made every later check
 	# believe the service was down: stop left the old process running, start
 	# spawned another one, and each settings change added a process until the
-	# port was taken.
+	# socket was held by a stale instance.
 	#
 	# The service is asked to record its own pid instead. dash and bash both
 	# keep $$ stale in a `sh -c` subshell on some paths, so a wrapper shell
@@ -421,17 +386,18 @@ start_process() {
 	rm -f "${PID_FILE}" 2>/dev/null
 	as_app_user "${APP_BIN}" \
 		--server \
-		--server-addr "127.0.0.1:${port}" \
+		--server-addr "${SERVER_ADDR}" \
+		--gateway-prefix "${GATEWAY_PREFIX}" \
 		--config "${CONFIG_FILE}" \
 		--pid-file "${PID_FILE}" \
 		>>"${LOG_FILE}" 2>&1 </dev/null &
 
 	cd "${dir}" || true
 
-	# Give the process a moment to bind the port so a failure is reported
-	# here instead of surfacing later as a blank iframe. The pid file is
-	# written by the launched shell, so give it a moment to appear before the
-	# first check, and drop the mode to owner-only once it exists.
+	# Give the process a moment to create the pid file so a failure is
+	# reported here instead of surfacing later as a blank iframe. The pid
+	# file is written by the service itself, so give it a moment to appear
+	# before the first check, and drop the mode to owner-only once it exists.
 	local waited=0
 	while ((waited < 10)); do
 		if [[ -s "${PID_FILE}" ]]; then

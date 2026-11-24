@@ -3,8 +3,8 @@
 # Runs after the package files are applied.
 #
 # Prepares everything the service needs on first start: writable directories,
-# a configuration file, the log location and the recorded port. Every step is
-# idempotent because fnOS may re-run the install flow during recovery.
+# a configuration file and the log location. Every step is idempotent because
+# fnOS may re-run the install flow during recovery.
 
 set -u
 
@@ -18,9 +18,7 @@ write_default_config || fail "cannot write ${CONFIG_FILE}"
 
 set_log_path
 
-port="$(resolve_port)"
-remember_port "${port}"
-echo_to_logs "installed, listening on 127.0.0.1:${port}"
+echo_to_logs "installed, published at ${GATEWAY_PREFIX}"
 
 # The account is still empty at this point: the install wizard does not ask
 # for it (see the manifest comment). The service starts anyway and shows an

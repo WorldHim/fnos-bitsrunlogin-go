@@ -2,14 +2,12 @@
 #
 # Runs after a settings change has been applied.
 #
-# Restarts the service so a port change takes effect. fnOS regenerates the
-# desktop entry from ${wizard_port} on its own; this only makes the process
-# listen on the same value.
+# Restarts the service so the change takes effect.
 #
 # The previous process is stopped here rather than trusting config_init to
 # have done it: fnOS does not promise that both halves of the pair always run
 # (a settings API call may only invoke the callback), and starting while the
-# old process still holds the port would silently leave the change unapplied.
+# old process still holds the socket would leave the new one unable to bind.
 
 set -u
 
@@ -22,14 +20,8 @@ set_log_path
 
 stop_process || true
 
-port="$(resolve_port)"
-# config_init already stored the new value when both halves run. Writing it
-# again from here would be harmless, but doing it only when the wizard
-# actually supplied a port keeps a lone callback from pinning a stale one.
-remember_port "${wizard_port:-}"
+start_process || fail "service failed to start"
 
-start_process || fail "service failed to start on port ${port}"
-
-echo_to_logs "configuration applied, running on 127.0.0.1:${port}"
+echo_to_logs "configuration applied, published at ${GATEWAY_PREFIX}"
 
 exit 0

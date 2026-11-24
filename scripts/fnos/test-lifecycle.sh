@@ -7,7 +7,7 @@
 # process. To keep this runnable anywhere (the development machine is Windows),
 # the harness substitutes a fake binary that sleeps instead of serving HTTP,
 # and fakes the user switching. What is actually verified here is the logic
-# the scripts own: directory layout, config creation, port resolution,
+# the scripts own: directory layout, config creation, gateway wiring,
 # start/stop/status exit codes, and idempotency under repeated calls.
 #
 # Usage: scripts/fnos/test-lifecycle.sh [--keep]
@@ -101,26 +101,23 @@ grep -q 'log_path: "'"${TRIM_PKGVAR}"'/logs"' "${TRIM_PKGVAR}/Config.yaml" &&
 	ok "log path points at the persistent dir" ||
 	bad "log path points at the persistent dir" "$(grep log_path "${TRIM_PKGVAR}/Config.yaml")"
 [[ -d "${TRIM_PKGVAR}/logs" ]] && ok "log dir created" || bad "log dir created"
-check_eq "9877" "$(cat "${TRIM_PKGVAR}/port")" "default port recorded"
+
+echo "wizard port is gone"
+# The desktop entry points at a gateway path, so a port collected by the
+# wizard has nowhere to go. A leftover field would be silently ignored, so
+# make its absence explicit.
+grep -q 'wizard_port' "${SRC}/wizard/install" 2>/dev/null &&
+	bad "install wizard does not ask for a port" ||
+	ok "install wizard does not ask for a port"
+grep -q 'service_port' "${SRC}/manifest" 2>/dev/null &&
+	bad "manifest declares no service port" ||
+	ok "manifest declares no service port"
 
 echo "install_callback is idempotent"
 before="$(md5sum <"${TRIM_PKGVAR}/Config.yaml")"
 bash "${ROOT}/cmd/install_callback" >/dev/null 2>&1
 after="$(md5sum <"${TRIM_PKGVAR}/Config.yaml")"
 check_eq "${before}" "${after}" "existing config is not overwritten"
-
-echo "wizard port is honoured"
-rm -f "${TRIM_PKGVAR}/port"
-wizard_port="18080" bash "${ROOT}/cmd/install_callback" >/dev/null 2>&1
-check_eq "18080" "$(cat "${TRIM_PKGVAR}/port")" "port from the wizard"
-
-echo "invalid wizard port falls back"
-rm -f "${TRIM_PKGVAR}/port"
-wizard_port="not-a-port" bash "${ROOT}/cmd/install_callback" >/dev/null 2>&1
-check_eq "9877" "$(cat "${TRIM_PKGVAR}/port")" "invalid port rejected"
-rm -f "${TRIM_PKGVAR}/port"
-wizard_port="70000" bash "${ROOT}/cmd/install_callback" >/dev/null 2>&1
-check_eq "9877" "$(cat "${TRIM_PKGVAR}/port")" "out of range port rejected"
 
 echo "status before start"
 bash "${MAIN}" status
@@ -145,9 +142,15 @@ kill -0 "${recorded_pid}" 2>/dev/null && ok "recorded pid is alive" || bad "reco
 echo "arguments passed to the binary"
 [[ -f "${TRIM_PKGVAR}/argv.txt" ]] && ok "binary was invoked" || bad "binary was invoked"
 grep -qx -- '--server' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null && ok "runs in server mode" || bad "runs in server mode"
-grep -qx -- '127.0.0.1:9877' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
-	ok "listens on the loopback default port" ||
-	bad "listens on the loopback default port" "$(tr '\n' ' ' <"${TRIM_PKGVAR}/argv.txt" 2>/dev/null)"
+grep -qx -- "--server-addr" "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
+	ok "server address is passed as a flag" ||
+	bad "server address is passed as a flag"
+grep -qx -- "unix:${ROOT}/app.sock" "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
+	ok "listens on the gateway socket" ||
+	bad "listens on the gateway socket" "$(tr '\n' ' ' <"${TRIM_PKGVAR}/argv.txt" 2>/dev/null)"
+grep -qx -- '/app/bitsrunlogin-go' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
+	ok "knows the gateway prefix" ||
+	bad "knows the gateway prefix" "$(tr '\n' ' ' <"${TRIM_PKGVAR}/argv.txt" 2>/dev/null)"
 grep -qx -- "${TRIM_PKGVAR}/Config.yaml" "${TRIM_PKGVAR}/argv.txt" 2>/dev/null &&
 	ok "config path points at the persistent file" ||
 	bad "config path points at the persistent file"
@@ -161,36 +164,26 @@ bash "${MAIN}" start >/dev/null 2>&1
 check_status 0 $? "second start succeeds"
 check_eq "${pid_before}" "$(cat "${TRIM_PKGVAR}/app.pid")" "second start does not spawn another process"
 
-echo "config_callback restarts on a new port"
+echo "config_callback restarts the service"
 rm -f "${TRIM_PKGVAR}/argv.txt"
-wizard_port="18081" bash "${ROOT}/cmd/config_callback" >/dev/null 2>&1
+bash "${ROOT}/cmd/config_callback" >/dev/null 2>&1
 check_status 0 $? "config_callback succeeds"
-check_eq "18081" "$(cat "${TRIM_PKGVAR}/port")" "new port recorded"
 # The fake binary writes its argv after it is exec'd, so wait for the file to
-# contain the new port rather than merely to exist: a stale copy from the
-# previous start satisfies an existence check but proves nothing.
+# reappear rather than assuming the previous run's copy is current.
 restarted=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-	if grep -qx -- '127.0.0.1:18081' "${TRIM_PKGVAR}/argv.txt" 2>/dev/null; then
+	if grep -qx -- "--server-addr" "${TRIM_PKGVAR}/argv.txt" 2>/dev/null; then
 		restarted=1
 		break
 	fi
 	sleep 1
 done
 [[ "${restarted}" == "1" ]] &&
-	ok "service restarted on the new port" ||
-	bad "service restarted on the new port" "$(tr '\n' ' ' <"${TRIM_PKGVAR}/argv.txt" 2>/dev/null)"
-
-# A plain start must not touch the recorded port. If it did, a start that
-# runs while a settings change is in flight would put the previous value back
-# and the service would come up on the port it was just moved off.
-echo "a bare start leaves the recorded port alone"
-bash "${MAIN}" stop >/dev/null 2>&1
-bash "${MAIN}" start >/dev/null 2>&1
-check_eq "18081" "$(cat "${TRIM_PKGVAR}/port")" "start does not rewrite the recorded port"
+	ok "service restarted by the config callback" ||
+	bad "service restarted by the config callback" "$(tr '\n' ' ' <"${TRIM_PKGVAR}/argv.txt" 2>/dev/null)"
 
 echo "config_init stops the service"
-wizard_port="18082" bash "${ROOT}/cmd/config_init" >/dev/null 2>&1
+bash "${ROOT}/cmd/config_init" >/dev/null 2>&1
 check_status 0 $? "config_init succeeds"
 bash "${MAIN}" status
 check_status 3 $? "service stopped for the change"
@@ -208,7 +201,7 @@ bash "${MAIN}" stop >/dev/null 2>&1
 check_status 0 $? "stop is idempotent"
 
 # A service whose pid file went missing must still be stopped. Otherwise the
-# process stays on the port, the next start fails to bind, and the failure
+# process stays on the socket, the next start cannot bind, and the failure
 # shows up as a settings change that will not save.
 if [[ -r "/proc/$$/comm" ]]; then
 	echo "stop recovers a service with no pid file"

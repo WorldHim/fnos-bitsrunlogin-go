@@ -2,10 +2,10 @@
 #
 # Runs before a settings change is applied.
 #
-# The settings page exposes the port and nothing else, so this records the
-# value that is about to take effect and stops the service. The reverse of
-# the swap happens in config_callback. Doing it in two steps keeps the
-# window where the service is down as small as possible.
+# There is nothing to remember: the service is published through the fnOS
+# gateway at a fixed path, so a settings change cannot move it. The service is
+# stopped here and started again in config_callback, which keeps the window
+# where it is down as small as possible.
 
 set -u
 
@@ -13,20 +13,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-port="$(resolve_port)"
-new_port="${port}"
-
 if is_running; then
 	stop_process || true
 fi
 
-# Store the port that is about to take effect, so a callback that runs without
-# a wizard value still finds the new one instead of the previous value.
-if [[ -n "${wizard_port:-}" ]]; then
-	remember_port "${wizard_port}"
-else
-	remember_port "${new_port}"
-fi
-echo_to_logs "configuration change requested, port ${new_port}"
+echo_to_logs "configuration change requested"
 
 exit 0
