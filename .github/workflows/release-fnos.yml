@@ -1,0 +1,183 @@
+name: Release fnOS
+
+# Builds the fnOS .fpk packages and attaches them to the release for a tag.
+#
+# The packages are unsigned. fnpack only signs with a developer certificate
+# issued by the fnOS team, and this project does not have one: the packages
+# are distributed here on GitHub and installed through the appcenter's
+# "manually install" flow, which does not require a signature. Removing
+# --nosign would make the build fail looking for a certificate that is not
+# there.
+#
+# No secrets are needed. If a certificate is ever obtained, add it as a
+# secret and drop --nosign in scripts/fnos/build.sh.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # The test suite needs a C compiler for -race, which the local development
+  # machine does not have. Running it here is what actually proves the data
+  # races are absent rather than merely unobserved.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Test with the race detector
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # fnOS package platform names, not Go's. build.sh maps them.
+        arch: [x86, arm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Setup fnpack
+        run: |
+          # The version is pinned: the package layout is checked by fnpack and
+          # a silent upgrade could start rejecting a tree that used to build.
+          FNPACK_VERSION="1.3.3"
+          curl -fsSL -o /usr/local/bin/fnpack \
+            "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64"
+          chmod +x /usr/local/bin/fnpack
+          fnpack --version || true
+
+      - name: Build package
+        run: |
+          ./scripts/fnos/build.sh --arch "${{ matrix.arch }}"
+
+      - name: Verify the package
+        run: |
+          fpk=$(find build/fnos -maxdepth 1 -name '*.fpk' -print -quit)
+          test -n "$fpk" || { echo "no .fpk produced"; exit 1; }
+          echo "built: $fpk"
+          # An .fpk is a gzip-compressed tar archive, but it is not flat: the
+          # payload directory is packed into a member called app.tgz, which
+          # the installer extracts into app/. So `tar -tf` lists app.tgz and
+          # never app/bitsrun directly, and anything inside the payload has to
+          # be looked for one level down. Strip CR in case this runs on a
+          # shell whose tar emits CRLF.
+          listing=$(tar -tf "$fpk" | tr -d '\r')
+          mkdir -p "$RUNNER_TEMP/unpack"
+          tar -xf "$fpk" -C "$RUNNER_TEMP/unpack" --wildcards '*/app.tgz' 'app.tgz' 2>/dev/null ||
+            tar -xf "$fpk" -C "$RUNNER_TEMP/unpack" app.tgz
+          payload="$RUNNER_TEMP/unpack/app.tgz"
+          test -f "$payload" || { echo "app.tgz is missing from the package"; exit 1; }
+          payload_listing=$(tar -tf "$payload" | tr -d '\r')
+          # Keep both listings in the job summary. These archives are what the
+          # installer sees, so when something is missing, the listing is the
+          # evidence needed to tell a packaging problem from a check problem.
+          {
+            echo "### Contents of $(basename "$fpk")"
+            echo '```'
+            printf '%s\n' "$listing"
+            echo '```'
+            echo "### Contents of app.tgz"
+            echo '```'
+            printf '%s\n' "$payload_listing"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          for want in manifest cmd/main config/privilege \
+                      config/resource ICON.PNG ICON_256.PNG \
+                      wizard/install wizard/config; do
+            if ! printf '%s\n' "$listing" | grep -qE "(^|/)${want}\$"; then
+              echo "missing from the package: $want"
+              exit 1
+            fi
+          done
+          for want in bitsrun ui/config ui/images/icon_64.png \
+                      ui/images/icon_256.png; do
+            if ! printf '%s\n' "$payload_listing" | grep -qE "(^|/)${want}\$"; then
+              echo "missing from app.tgz: $want"
+              exit 1
+            fi
+          done
+          # The binary must be an ELF for the architecture in the name. The
+          # ELF header is read directly rather than through `file`, whose
+          # output wording differs between implementations.
+          mkdir -p "$RUNNER_TEMP/payload"
+          tar -xf "$payload" -C "$RUNNER_TEMP/payload"
+          bin=$(find "$RUNNER_TEMP/payload" -name bitsrun -type f -print -quit)
+          test -n "$bin" || { echo "bitsrun is missing from app.tgz"; exit 1; }
+
+          python3 - "$bin" "${{ matrix.arch }}" <<'PY'
+          import struct
+          import sys
+
+          path, want = sys.argv[1], sys.argv[2]
+          with open(path, 'rb') as handle:
+              header = handle.read(20)
+
+          if header[:4] != b'\x7fELF':
+              sys.exit(f'{path} is not an ELF binary')
+
+          order = '<' if header[5] == 1 else '>'
+          machine = struct.unpack(order + 'H', header[18:20])[0]
+          # e_machine values from the ELF specification.
+          expected = {'x86': 0x3E, 'arm': 0xB7}[want]
+          names = {0x3E: 'x86-64', 0xB7: 'ARM aarch64'}
+          if machine != expected:
+              sys.exit(f'binary is {names.get(machine, hex(machine))}, expected {names[expected]}')
+          print(f'binary architecture: {names[machine]}')
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: fpk-${{ matrix.arch }}
+          path: build/fnos/*.fpk
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List packages
+        run: ls -l dist
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.fpk
